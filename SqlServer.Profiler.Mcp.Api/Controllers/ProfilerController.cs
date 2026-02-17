@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using SqlServer.Profiler.Mcp.Api.Models;
+using SqlServer.Profiler.Mcp.Services;
 using SqlServer.Profiler.Mcp.Tools;
 
 namespace SqlServer.Profiler.Mcp.Api.Controllers;
@@ -15,6 +17,7 @@ public class ProfilerController : ControllerBase
     private readonly EventRetrievalTools _eventTools;
     private readonly PermissionTools _permissionTools;
     private readonly DiagnosticTools _diagnosticTools;
+    private readonly IEventStreamingService _streamingService;
     private readonly IConfiguration _configuration;
 
     public ProfilerController(
@@ -22,12 +25,14 @@ public class ProfilerController : ControllerBase
         EventRetrievalTools eventTools,
         PermissionTools permissionTools,
         DiagnosticTools diagnosticTools,
+        IEventStreamingService streamingService,
         IConfiguration configuration)
     {
         _sessionTools = sessionTools;
         _eventTools = eventTools;
         _permissionTools = permissionTools;
         _diagnosticTools = diagnosticTools;
+        _streamingService = streamingService;
         _configuration = configuration;
     }
 
@@ -378,5 +383,89 @@ public class ProfilerController : ControllerBase
         var connStr = ResolveConnectionString(connectionString);
         var result = await _diagnosticTools.HealthCheck(connStr, sessionName ?? "", slowQueryThresholdMs, responseFormat);
         return JsonContent(result);
+    }
+
+    // ──────────────────────────────────────────────
+    // Real-Time Streaming (SSE)
+    // ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Stream captured events in real-time using Server-Sent Events (SSE).
+    /// Connect with curl -N or EventSource in JavaScript. Events are pushed as they are captured.
+    /// </summary>
+    /// <param name="sessionName">Name of the profiling session (must be running).</param>
+    /// <param name="connectionString">Optional SQL Server connection string override.</param>
+    /// <param name="database">Filter to specific database.</param>
+    /// <param name="application">Filter to specific application.</param>
+    /// <param name="textContains">Filter to queries containing this text.</param>
+    [HttpGet("sessions/{sessionName}/stream")]
+    public async Task StreamEvents(
+        [FromRoute] string sessionName,
+        [FromQuery] string? connectionString = null,
+        [FromQuery] string? database = null,
+        [FromQuery] string? application = null,
+        [FromQuery] string? textContains = null)
+    {
+        var connStr = ResolveConnectionString(connectionString);
+
+        var filters = new EventFilters
+        {
+            Database = database,
+            Application = application,
+            TextContains = textContains
+        };
+
+        Response.Headers["Content-Type"] = "text/event-stream";
+        Response.Headers["Cache-Control"] = "no-cache";
+        Response.Headers["Connection"] = "keep-alive";
+
+        var streamId = _streamingService.StartStreaming(sessionName, connStr, filters);
+        var channel = _streamingService.GetEventChannel(streamId);
+
+        if (channel == null)
+        {
+            Response.StatusCode = 500;
+            await Response.WriteAsync("data: {\"error\":\"Failed to start stream\"}\n\n");
+            return;
+        }
+
+        try
+        {
+            // Send initial connection event
+            await Response.WriteAsync($"data: {{\"type\":\"connected\",\"streamId\":\"{streamId}\",\"sessionName\":\"{sessionName}\"}}\n\n");
+            await Response.Body.FlushAsync();
+
+            await foreach (var evt in channel.ReadAllAsync(HttpContext.RequestAborted))
+            {
+                var json = JsonSerializer.Serialize(new
+                {
+                    type = "event",
+                    evt.EventName,
+                    evt.EventTimestamp,
+                    evt.DurationUs,
+                    evt.DurationFormatted,
+                    evt.CpuTimeUs,
+                    evt.LogicalReads,
+                    evt.Writes,
+                    evt.SqlText,
+                    evt.DatabaseName,
+                    evt.ClientAppName,
+                    evt.LoginName,
+                    evt.SessionId,
+                    evt.QueryFingerprint
+                }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+                await Response.WriteAsync($"data: {json}\n\n");
+                await Response.Body.FlushAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Client disconnected — normal
+        }
+        finally
+        {
+            _streamingService.StopStreaming(streamId);
+        }
     }
 }

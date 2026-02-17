@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics;
 using SqlServer.Profiler.Mcp.Services;
 using SqlServer.Profiler.Mcp.Tools;
 
@@ -11,6 +13,9 @@ builder.Services.AddSingleton<IProfilerService, ProfilerService>();
 builder.Services.AddSingleton<IQueryFingerprintService, QueryFingerprintService>();
 builder.Services.AddSingleton<IWaitStatsService, WaitStatsService>();
 builder.Services.AddSingleton<SessionConfigStore>();
+builder.Services.AddSingleton<EventStreamingService>();
+builder.Services.AddSingleton<IEventStreamingService>(sp => sp.GetRequiredService<EventStreamingService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<EventStreamingService>());
 
 // Register MCP tool classes as transient (they are lightweight wrappers)
 builder.Services.AddTransient<SessionManagementTools>();
@@ -40,6 +45,33 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+
+// Global exception handler — returns sanitized errors, never exposes internals
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        var exceptionFeature = context.Features.Get<IExceptionHandlerFeature>();
+        var exception = exceptionFeature?.Error;
+
+        if (exception != null)
+        {
+            logger.LogError(exception, "Unhandled exception on {Method} {Path}", context.Request.Method, context.Request.Path);
+        }
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+
+        var error = new
+        {
+            error = "An internal error occurred. Check server logs for details.",
+            traceId = context.TraceIdentifier
+        };
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(error));
+    });
+});
 
 // Enable Swagger UI in all environments for debugging purposes
 app.UseSwagger();

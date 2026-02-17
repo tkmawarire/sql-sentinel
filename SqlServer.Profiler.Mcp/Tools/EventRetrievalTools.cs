@@ -16,15 +16,18 @@ public class EventRetrievalTools
     private readonly IProfilerService _profilerService;
     private readonly SessionConfigStore _configStore;
     private readonly IQueryFingerprintService _fingerprintService;
+    private readonly IEventStreamingService _streamingService;
 
     public EventRetrievalTools(
-        IProfilerService profilerService, 
+        IProfilerService profilerService,
         SessionConfigStore configStore,
-        IQueryFingerprintService fingerprintService)
+        IQueryFingerprintService fingerprintService,
+        IEventStreamingService streamingService)
     {
         _profilerService = profilerService;
         _configStore = configStore;
         _fingerprintService = fingerprintService;
+        _streamingService = streamingService;
     }
 
     /// <summary>
@@ -605,6 +608,136 @@ public class EventRetrievalTools
             sb.AppendLine(entry.SqlText);
             sb.AppendLine("```");
             sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    // ──────────────────────────────────────────────
+    // Real-Time Streaming
+    // ──────────────────────────────────────────────
+
+    [McpServerTool(Name = "sqlsentinel_stream_events")]
+    [Description("""
+        Capture events in real-time for a specified duration.
+
+        Starts a live stream on the profiling session and collects all events that occur
+        during the capture window. Use this to observe which queries execute during a specific
+        operation — start the stream, perform the operation, then review the captured events.
+
+        The stream automatically stops after durationSeconds elapses.
+        Events are returned sorted by timestamp with full query details.
+        """)]
+    public async Task<string> StreamEvents(
+        [Description("Name of the profiling session (must be running)")] string sessionName,
+        [Description("SQL Server connection string")] string connectionString,
+        [Description("How long to capture events in seconds (1-300). Default 30.")] int durationSeconds = 30,
+        [Description("Filter to specific database")] string? database = null,
+        [Description("Filter to specific application")] string? application = null,
+        [Description("Filter to specific login")] string? login = null,
+        [Description("Filter to queries containing this text")] string? textContains = null,
+        [Description("Output format: Json or Markdown")] string responseFormat = "Json")
+    {
+        try
+        {
+            durationSeconds = Math.Clamp(durationSeconds, 1, 300);
+
+            var filters = new EventFilters
+            {
+                Database = database,
+                Application = application,
+                Login = login,
+                TextContains = textContains
+            };
+
+            var streamId = _streamingService.StartStreaming(sessionName, connectionString, filters);
+            var channel = _streamingService.GetEventChannel(streamId);
+
+            if (channel == null)
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    success = false,
+                    error = "Failed to start event stream."
+                }, JsonOptions.Default);
+            }
+
+            var events = new List<ProfilerEvent>();
+            var deadline = DateTime.UtcNow.AddSeconds(durationSeconds);
+
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(durationSeconds));
+
+                await foreach (var evt in channel.ReadAllAsync(cts.Token))
+                {
+                    events.Add(evt);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected — duration elapsed
+            }
+            finally
+            {
+                _streamingService.StopStreaming(streamId);
+            }
+
+            var result = new
+            {
+                success = true,
+                sessionName,
+                capturedDurationSeconds = durationSeconds,
+                totalEvents = events.Count,
+                timeRange = events.Count > 0
+                    ? new { start = events.Min(e => e.EventTimestamp), end = events.Max(e => e.EventTimestamp) }
+                    : null as object,
+                events = events.OrderBy(e => e.EventTimestamp).ToList()
+            };
+
+            if (responseFormat.Equals("Markdown", StringComparison.OrdinalIgnoreCase))
+            {
+                return FormatStreamMarkdown(result.totalEvents, durationSeconds, events);
+            }
+
+            return JsonSerializer.Serialize(result, JsonOptions.Default);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = ex.Message,
+                suggestion = "Ensure the session exists and is running."
+            }, JsonOptions.Default);
+        }
+    }
+
+    private static string FormatStreamMarkdown(int totalEvents, int durationSeconds, List<ProfilerEvent> events)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Live Capture Results ({durationSeconds}s window)");
+        sb.AppendLine();
+        sb.AppendLine($"**Events Captured:** {totalEvents}");
+
+        if (events.Count == 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("No events captured during the window.");
+            return sb.ToString();
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("| # | Time | Event | Duration | Database | SQL |");
+        sb.AppendLine("|---|------|-------|----------|----------|-----|");
+
+        var sorted = events.OrderBy(e => e.EventTimestamp).ToList();
+        for (var i = 0; i < sorted.Count; i++)
+        {
+            var e = sorted[i];
+            var time = e.EventTimestamp?.ToString("HH:mm:ss.fff") ?? "?";
+            var sql = (e.SqlText.Length > 80 ? e.SqlText[..80] + "..." : e.SqlText).Replace("|", "\\|").Replace("\n", " ");
+            sb.AppendLine($"| {i + 1} | {time} | {e.EventName} | {e.DurationFormatted} | {e.DatabaseName} | `{sql}` |");
         }
 
         return sb.ToString();

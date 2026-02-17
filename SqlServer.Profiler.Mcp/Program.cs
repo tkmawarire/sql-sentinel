@@ -40,6 +40,9 @@ public class Program
         builder.Services.AddSingleton<IQueryFingerprintService, QueryFingerprintService>();
         builder.Services.AddSingleton<IWaitStatsService, WaitStatsService>();
         builder.Services.AddSingleton<SessionConfigStore>();
+        builder.Services.AddSingleton<EventStreamingService>();
+        builder.Services.AddSingleton<IEventStreamingService>(sp => sp.GetRequiredService<EventStreamingService>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<EventStreamingService>());
 
         // Register MCP Server
         builder.Services.AddMcpServer(options =>
