@@ -7,7 +7,6 @@
     <SelfContained>true</SelfContained>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../SqlServer.Profiler.Mcp.csproj" />
     <ProjectReference Include="..\SqlServer.Profiler.Mcp\SqlServer.Profiler.Mcp.csproj" />
   </ItemGroup>
 </Project>
