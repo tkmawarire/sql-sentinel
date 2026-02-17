@@ -226,14 +226,11 @@ public partial class ProfilerService : IProfilerService
         var query = $"""
             SELECT
                 s.name as session_name,
-                CASE WHEN ds.name IS NOT NULL THEN 'RUNNING' ELSE 'STOPPED' END as state,
-                s.create_time,
-                ISNULL(st.target_data_size, 0) as buffer_used_bytes
+                CASE WHEN ds.name IS NOT NULL THEN 'RUNNING' ELSE 'STOPPED' END as state
             FROM sys.server_event_sessions s
             LEFT JOIN sys.dm_xe_sessions ds ON s.name = ds.name
-            LEFT JOIN sys.dm_xe_session_targets st ON ds.address = st.event_session_address
             WHERE s.name LIKE '{SessionPrefix}%'
-            ORDER BY s.create_time DESC
+            ORDER BY s.name
             """;
 
         await using var cmd = new SqlCommand(query, conn);
@@ -243,16 +240,15 @@ public partial class ProfilerService : IProfilerService
         while (await reader.ReadAsync())
         {
             var sessionName = reader.GetString(0);
-            var bufferBytes = reader.GetInt64(3);
 
             sessions.Add(new SessionInfo
             {
                 SessionName = sessionName,
                 DisplayName = sessionName.Replace(SessionPrefix, ""),
                 State = reader.GetString(1),
-                CreateTime = reader.IsDBNull(2) ? null : reader.GetDateTime(2),
-                BufferUsedBytes = bufferBytes,
-                BufferUsedFormatted = FormatBytes(bufferBytes)
+                CreateTime = null,
+                BufferUsedBytes = 0,
+                BufferUsedFormatted = "N/A"
             });
         }
 
@@ -561,7 +557,7 @@ public partial class ProfilerService : IProfilerService
                 apps.Add(new ConnectionInfoItem
                 {
                     Name = reader.GetString(0),
-                    Count = reader.GetInt32(1)
+                    Count = Convert.ToInt32(reader.GetValue(1))
                 });
             }
             result["applications"] = apps;
@@ -584,7 +580,7 @@ public partial class ProfilerService : IProfilerService
                 logins.Add(new ConnectionInfoItem
                 {
                     Name = reader.GetString(0),
-                    Count = reader.GetInt32(1)
+                    Count = Convert.ToInt32(reader.GetValue(1))
                 });
             }
             result["logins"] = logins;
@@ -616,15 +612,15 @@ public partial class ProfilerService : IProfilerService
             {
                 sessions.Add(new ActiveSession
                 {
-                    SessionId = reader.GetInt32(0),
+                    SessionId = Convert.ToInt32(reader.GetValue(0)),
                     LoginName = reader.IsDBNull(1) ? null : reader.GetString(1),
                     HostName = reader.IsDBNull(2) ? null : reader.GetString(2),
                     ProgramName = reader.IsDBNull(3) ? null : reader.GetString(3),
                     DatabaseName = reader.IsDBNull(4) ? null : reader.GetString(4),
                     Status = reader.IsDBNull(5) ? null : reader.GetString(5),
-                    CpuTime = reader.GetInt32(6),
-                    Reads = reader.GetInt64(7),
-                    Writes = reader.GetInt64(8),
+                    CpuTime = Convert.ToInt32(reader.GetValue(6)),
+                    Reads = Convert.ToInt64(reader.GetValue(7)),
+                    Writes = Convert.ToInt64(reader.GetValue(8)),
                     LoginTime = reader.IsDBNull(9) ? null : reader.GetDateTime(9),
                     LastRequestStartTime = reader.IsDBNull(10) ? null : reader.GetDateTime(10)
                 });
