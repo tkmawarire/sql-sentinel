@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Microsoft.Data.SqlClient;
 using SqlServer.Profiler.Mcp.Models;
 
@@ -17,6 +18,8 @@ public interface IProfilerService
     Task<List<SessionInfo>> ListSessionsAsync(string connectionString);
     Task<List<ProfilerEvent>> GetEventsAsync(string connectionString, string sessionName, EventFilters filters, List<string>? excludePatterns = null);
     Task<Dictionary<string, object>> GetConnectionInfoAsync(string connectionString, string infoType);
+    Task<List<DeadlockEvent>> GetDeadlocksAsync(string connectionString, string sessionName);
+    Task<List<BlockingEvent>> GetBlockingEventsAsync(string connectionString, string sessionName);
 }
 
 public record EventFilters
@@ -33,8 +36,37 @@ public record EventFilters
 
 public partial class ProfilerService : IProfilerService
 {
-    private const string SessionPrefix = "mcp_profiler_";
+    private const string SessionPrefix = "mcp_sentinel_";
     private readonly IQueryFingerprintService _fingerprintService;
+
+    // Standard events that use the full action list and predicates
+    private static readonly Dictionary<EventType, string> StandardEventMap = new()
+    {
+        [EventType.SqlBatchCompleted] = "sqlserver.sql_batch_completed",
+        [EventType.RpcCompleted] = "sqlserver.rpc_completed",
+        [EventType.SqlStatementCompleted] = "sqlserver.sql_statement_completed",
+        [EventType.SpStatementCompleted] = "sqlserver.sp_statement_completed",
+        [EventType.Attention] = "sqlserver.attention",
+        [EventType.ErrorReported] = "sqlserver.error_reported",
+        [EventType.LoginEvent] = "sqlserver.login",
+        [EventType.Recompile] = "sqlserver.sql_statement_recompile",
+        [EventType.AutoStats] = "sqlserver.auto_stats"
+    };
+
+    // XML-payload events: different XE definition shape (no sql_text action, no predicates)
+    private static readonly Dictionary<EventType, string> XmlPayloadEventMap = new()
+    {
+        [EventType.Deadlock] = "sqlserver.xml_deadlock_report",
+        [EventType.BlockedProcess] = "sqlserver.blocked_process_report"
+    };
+
+    // SchemaChange maps to multiple XE events
+    private static readonly List<string> SchemaChangeEvents =
+    [
+        "sqlserver.object_altered",
+        "sqlserver.object_created",
+        "sqlserver.object_dropped"
+    ];
 
     public ProfilerService(IQueryFingerprintService fingerprintService)
     {
@@ -60,19 +92,9 @@ public partial class ProfilerService : IProfilerService
                 $"Session '{config.SessionName}' already exists. Drop it first or use a different name.");
         }
 
-        // Build event definitions
-        var eventMap = new Dictionary<EventType, string>
-        {
-            [EventType.SqlBatchCompleted] = "sqlserver.sql_batch_completed",
-            [EventType.RpcCompleted] = "sqlserver.rpc_completed",
-            [EventType.SqlStatementCompleted] = "sqlserver.sql_statement_completed",
-            [EventType.SpStatementCompleted] = "sqlserver.sp_statement_completed",
-            [EventType.Attention] = "sqlserver.attention",
-            [EventType.ErrorReported] = "sqlserver.error_reported"
-        };
-
+        // Expand All to include every event type
         var eventTypes = config.EventTypes.Contains(EventType.All)
-            ? eventMap.Keys.ToList()
+            ? Enum.GetValues<EventType>().Where(e => e != EventType.All).ToList()
             : config.EventTypes;
 
         var predicate = BuildPredicateClause(config);
@@ -80,24 +102,20 @@ public partial class ProfilerService : IProfilerService
 
         foreach (var eventType in eventTypes)
         {
-            if (eventMap.TryGetValue(eventType, out var eventName))
+            if (eventType == EventType.SchemaChange)
             {
-                var eventDef = $"""
-                    ADD EVENT {eventName}(
-                        ACTION(
-                            sqlserver.database_name,
-                            sqlserver.client_app_name,
-                            sqlserver.client_hostname,
-                            sqlserver.server_principal_name,
-                            sqlserver.session_id,
-                            sqlserver.sql_text,
-                            sqlserver.transaction_id,
-                            sqlserver.request_id
-                        )
-                        {predicate}
-                    )
-                    """;
-                eventDefinitions.Add(eventDef);
+                foreach (var xeEventName in SchemaChangeEvents)
+                {
+                    eventDefinitions.Add(BuildStandardEventDef(xeEventName, predicate));
+                }
+            }
+            else if (XmlPayloadEventMap.TryGetValue(eventType, out var xmlEventName))
+            {
+                eventDefinitions.Add(BuildXmlPayloadEventDef(xmlEventName));
+            }
+            else if (StandardEventMap.TryGetValue(eventType, out var eventName))
+            {
+                eventDefinitions.Add(BuildStandardEventDef(eventName, predicate));
             }
         }
 
@@ -123,7 +141,7 @@ public partial class ProfilerService : IProfilerService
             ["success"] = true,
             ["sessionName"] = config.SessionName,
             ["fullSessionName"] = fullSessionName,
-            ["message"] = $"Session '{config.SessionName}' created successfully. Use sqlprofiler_start_session to begin capture."
+            ["message"] = $"Session '{config.SessionName}' created successfully. Use sqlsentinel_start_session to begin capture."
         };
     }
 
@@ -206,7 +224,7 @@ public partial class ProfilerService : IProfilerService
         await conn.OpenAsync();
 
         var query = $"""
-            SELECT 
+            SELECT
                 s.name as session_name,
                 CASE WHEN ds.name IS NOT NULL THEN 'RUNNING' ELSE 'STOPPED' END as state,
                 s.create_time,
@@ -254,14 +272,14 @@ public partial class ProfilerService : IProfilerService
 
         var query = $"""
             ;WITH EventData AS (
-                SELECT 
+                SELECT
                     CAST(target_data AS XML) as event_xml
                 FROM sys.dm_xe_session_targets st
                 INNER JOIN sys.dm_xe_sessions s ON s.address = st.event_session_address
                 WHERE s.name = '{fullSessionName}'
                 AND st.target_name = 'ring_buffer'
             )
-            SELECT 
+            SELECT
                 event_node.value('(@name)[1]', 'varchar(100)') as event_name,
                 event_node.value('(@timestamp)[1]', 'datetime2') as event_timestamp,
                 event_node.value('(data[@name="duration"]/value)[1]', 'bigint') as duration_us,
@@ -281,9 +299,11 @@ public partial class ProfilerService : IProfilerService
                 event_node.value('(action[@name="request_id"]/value)[1]', 'int') as request_id,
                 event_node.value('(data[@name="result"]/text)[1]', 'varchar(50)') as result,
                 event_node.value('(data[@name="error_number"]/value)[1]', 'int') as error_number,
-                event_node.value('(data[@name="message"]/value)[1]', 'nvarchar(max)') as error_message
+                event_node.value('(data[@name="message"]/value)[1]', 'nvarchar(max)') as error_message,
+                event_node.value('(data[@name="object_name"]/value)[1]', 'nvarchar(256)') as object_name,
+                event_node.value('(action[@name="sql_text"]/value)[1]', 'nvarchar(max)') as action_sql_text
             FROM EventData
-            CROSS APPLY event_xml.nodes('//RingBufferTarget/event') AS events(event_node)
+            CROSS APPLY event_xml.nodes('//RingBufferTarget/event[not(@name="xml_deadlock_report" or @name="blocked_process_report")]') AS events(event_node)
             ORDER BY event_timestamp
             """;
 
@@ -295,9 +315,18 @@ public partial class ProfilerService : IProfilerService
         var events = new List<ProfilerEvent>();
         while (await reader.ReadAsync())
         {
+            var eventName = reader.IsDBNull(0) ? "" : reader.GetString(0);
             var batchText = reader.IsDBNull(8) ? null : reader.GetString(8);
             var statement = reader.IsDBNull(9) ? null : reader.GetString(9);
-            var sqlText = batchText ?? statement ?? "";
+            var objectName = reader.IsDBNull(20) ? null : reader.GetString(20);
+            var actionSqlText = reader.IsDBNull(21) ? null : reader.GetString(21);
+
+            // For schema change events, use object name if no sql text
+            var sqlText = batchText ?? statement ?? actionSqlText ?? "";
+            if (string.IsNullOrEmpty(sqlText) && !string.IsNullOrEmpty(objectName))
+            {
+                sqlText = $"{eventName}: {objectName}";
+            }
 
             var eventTimestamp = reader.IsDBNull(1) ? (DateTime?)null : reader.GetDateTime(1);
             var databaseName = reader.IsDBNull(10) ? "" : reader.GetString(10);
@@ -329,7 +358,7 @@ public partial class ProfilerService : IProfilerService
 
             var evt = new ProfilerEvent
             {
-                EventName = reader.IsDBNull(0) ? "" : reader.GetString(0),
+                EventName = eventName,
                 EventTimestamp = eventTimestamp,
                 DurationUs = durationUs,
                 CpuTimeUs = reader.IsDBNull(3) ? 0L : reader.GetInt64(3),
@@ -356,6 +385,118 @@ public partial class ProfilerService : IProfilerService
         }
 
         return events;
+    }
+
+    public async Task<List<DeadlockEvent>> GetDeadlocksAsync(string connectionString, string sessionName)
+    {
+        var fullSessionName = $"{SessionPrefix}{sessionName}";
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+
+        var query = $"""
+            ;WITH EventData AS (
+                SELECT CAST(target_data AS XML) as event_xml
+                FROM sys.dm_xe_session_targets st
+                INNER JOIN sys.dm_xe_sessions s ON s.address = st.event_session_address
+                WHERE s.name = '{fullSessionName}'
+                AND st.target_name = 'ring_buffer'
+            )
+            SELECT
+                event_node.value('(@timestamp)[1]', 'datetime2') as event_timestamp,
+                event_node.value('(data[@name="xml_report"]/value)[1]', 'nvarchar(max)') as deadlock_xml
+            FROM EventData
+            CROSS APPLY event_xml.nodes('//RingBufferTarget/event[@name="xml_deadlock_report"]') AS events(event_node)
+            ORDER BY event_timestamp
+            """;
+
+        await using var cmd = new SqlCommand(query, conn);
+        cmd.CommandTimeout = 120;
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var deadlocks = new List<DeadlockEvent>();
+
+        while (await reader.ReadAsync())
+        {
+            var timestamp = reader.IsDBNull(0) ? (DateTime?)null : reader.GetDateTime(0);
+            var xmlString = reader.IsDBNull(1) ? null : reader.GetString(1);
+
+            if (string.IsNullOrEmpty(xmlString))
+                continue;
+
+            try
+            {
+                var deadlock = ParseDeadlockXml(xmlString, timestamp);
+                deadlocks.Add(deadlock);
+            }
+            catch
+            {
+                // Malformed or truncated XML — skip this event
+                deadlocks.Add(new DeadlockEvent
+                {
+                    EventTimestamp = timestamp,
+                    RawXml = xmlString,
+                    VictimSpid = "parse_error"
+                });
+            }
+        }
+
+        return deadlocks;
+    }
+
+    public async Task<List<BlockingEvent>> GetBlockingEventsAsync(string connectionString, string sessionName)
+    {
+        var fullSessionName = $"{SessionPrefix}{sessionName}";
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+
+        var query = $"""
+            ;WITH EventData AS (
+                SELECT CAST(target_data AS XML) as event_xml
+                FROM sys.dm_xe_session_targets st
+                INNER JOIN sys.dm_xe_sessions s ON s.address = st.event_session_address
+                WHERE s.name = '{fullSessionName}'
+                AND st.target_name = 'ring_buffer'
+            )
+            SELECT
+                event_node.value('(@timestamp)[1]', 'datetime2') as event_timestamp,
+                event_node.value('(data[@name="blocked_process"]/value)[1]', 'nvarchar(max)') as blocking_xml
+            FROM EventData
+            CROSS APPLY event_xml.nodes('//RingBufferTarget/event[@name="blocked_process_report"]') AS events(event_node)
+            ORDER BY event_timestamp
+            """;
+
+        await using var cmd = new SqlCommand(query, conn);
+        cmd.CommandTimeout = 120;
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var blockingEvents = new List<BlockingEvent>();
+
+        while (await reader.ReadAsync())
+        {
+            var timestamp = reader.IsDBNull(0) ? (DateTime?)null : reader.GetDateTime(0);
+            var xmlString = reader.IsDBNull(1) ? null : reader.GetString(1);
+
+            if (string.IsNullOrEmpty(xmlString))
+                continue;
+
+            try
+            {
+                var blocking = ParseBlockingXml(xmlString, timestamp);
+                blockingEvents.Add(blocking);
+            }
+            catch
+            {
+                blockingEvents.Add(new BlockingEvent
+                {
+                    EventTimestamp = timestamp,
+                    RawXml = xmlString
+                });
+            }
+        }
+
+        return blockingEvents;
     }
 
     public async Task<Dictionary<string, object>> GetConnectionInfoAsync(string connectionString, string infoType)
@@ -441,7 +582,7 @@ public partial class ProfilerService : IProfilerService
         {
             var sessions = new List<ActiveSession>();
             await using var cmd = new SqlCommand("""
-                SELECT 
+                SELECT
                     s.session_id,
                     s.login_name,
                     s.host_name,
@@ -479,8 +620,191 @@ public partial class ProfilerService : IProfilerService
             result["activeSessions"] = sessions;
         }
 
+        if (infoType is "blocking" or "all")
+        {
+            var blocking = new List<ActiveBlockingInfo>();
+            await using var cmd = new SqlCommand("""
+                SELECT
+                    r.session_id as blocked_spid,
+                    r.blocking_session_id as blocking_spid,
+                    r.wait_type,
+                    r.wait_time as wait_time_ms,
+                    r.wait_resource,
+                    s.login_name as blocked_login,
+                    DB_NAME(r.database_id) as blocked_database,
+                    SUBSTRING(t.text, (r.statement_start_offset/2)+1,
+                        ((CASE r.statement_end_offset
+                            WHEN -1 THEN DATALENGTH(t.text)
+                            ELSE r.statement_end_offset
+                        END - r.statement_start_offset)/2)+1) AS current_sql
+                FROM sys.dm_exec_requests r
+                INNER JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
+                OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
+                WHERE r.blocking_session_id > 0
+                """, conn);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                blocking.Add(new ActiveBlockingInfo
+                {
+                    BlockedSpid = reader.GetInt16(0),
+                    BlockingSpid = reader.GetInt16(1),
+                    WaitType = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    WaitTimeMs = reader.GetInt64(3),
+                    WaitResource = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    BlockedLoginName = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    BlockedDatabase = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    BlockedSqlText = reader.IsDBNull(7) ? null : reader.GetString(7)
+                });
+            }
+            result["activeBlocking"] = blocking;
+        }
+
         return result;
     }
+
+    // ──────────────────────────────────────────────
+    // XE session DDL builders
+    // ──────────────────────────────────────────────
+
+    private static string BuildStandardEventDef(string eventName, string predicate)
+    {
+        return $"""
+            ADD EVENT {eventName}(
+                ACTION(
+                    sqlserver.database_name,
+                    sqlserver.client_app_name,
+                    sqlserver.client_hostname,
+                    sqlserver.server_principal_name,
+                    sqlserver.session_id,
+                    sqlserver.sql_text,
+                    sqlserver.transaction_id,
+                    sqlserver.request_id
+                )
+                {predicate}
+            )
+            """;
+    }
+
+    private static string BuildXmlPayloadEventDef(string eventName)
+    {
+        return $"""
+            ADD EVENT {eventName}(
+                ACTION(
+                    sqlserver.session_id,
+                    sqlserver.server_principal_name
+                )
+            )
+            """;
+    }
+
+    // ──────────────────────────────────────────────
+    // XML parsers for deadlock and blocking events
+    // ──────────────────────────────────────────────
+
+    private static DeadlockEvent ParseDeadlockXml(string xmlString, DateTime? timestamp)
+    {
+        var doc = XDocument.Parse(xmlString);
+        var deadlockNode = doc.Descendants("deadlock").FirstOrDefault() ?? doc.Root!;
+
+        // Find victim process id
+        var victimId = deadlockNode.Descendants("victimProcess")
+            .FirstOrDefault()?.Attribute("id")?.Value ?? "";
+
+        // Parse processes
+        var processes = new List<DeadlockProcess>();
+        foreach (var processNode in deadlockNode.Descendants("process"))
+        {
+            var processId = processNode.Attribute("id")?.Value ?? "";
+            var spidStr = processNode.Attribute("spid")?.Value;
+            int.TryParse(spidStr, out var spid);
+
+            var waitTimeStr = processNode.Attribute("waittime")?.Value;
+            int.TryParse(waitTimeStr, out var waitTime);
+
+            var inputBuf = processNode.Element("inputbuf")?.Value?.Trim();
+
+            processes.Add(new DeadlockProcess
+            {
+                ProcessId = processId,
+                Spid = spid,
+                LoginName = processNode.Attribute("loginname")?.Value,
+                HostName = processNode.Attribute("hostname")?.Value,
+                ApplicationName = processNode.Attribute("clientapp")?.Value,
+                DatabaseName = processNode.Attribute("currentdb")?.Value,
+                WaitResource = processNode.Attribute("waitresource")?.Value,
+                LockMode = processNode.Attribute("lockMode")?.Value,
+                WaitTime = waitTime,
+                SqlText = inputBuf,
+                IsVictim = processId == victimId
+            });
+        }
+
+        return new DeadlockEvent
+        {
+            EventTimestamp = timestamp,
+            VictimSpid = processes.FirstOrDefault(p => p.IsVictim)?.Spid.ToString() ?? victimId,
+            Processes = processes,
+            RawXml = xmlString
+        };
+    }
+
+    private static BlockingEvent ParseBlockingXml(string xmlString, DateTime? timestamp)
+    {
+        var doc = XDocument.Parse(xmlString);
+        var root = doc.Root!;
+
+        var blockedNode = root.Descendants("blocked-process").FirstOrDefault()?.Element("process");
+        var blockingNode = root.Descendants("blocking-process").FirstOrDefault()?.Element("process");
+
+        var blockedInfo = new BlockedProcessInfo();
+        if (blockedNode != null)
+        {
+            int.TryParse(blockedNode.Attribute("spid")?.Value, out var spid);
+            int.TryParse(blockedNode.Attribute("waittime")?.Value, out var waitTime);
+
+            blockedInfo = new BlockedProcessInfo
+            {
+                Spid = spid,
+                WaitResource = blockedNode.Attribute("waitresource")?.Value,
+                WaitTimeMs = waitTime,
+                LoginName = blockedNode.Attribute("loginname")?.Value,
+                HostName = blockedNode.Attribute("hostname")?.Value,
+                DatabaseName = blockedNode.Attribute("currentdb")?.Value,
+                SqlText = blockedNode.Element("inputbuf")?.Value?.Trim(),
+                LockMode = blockedNode.Attribute("lockMode")?.Value
+            };
+        }
+
+        var blockingInfo = new BlockingProcessInfo();
+        if (blockingNode != null)
+        {
+            int.TryParse(blockingNode.Attribute("spid")?.Value, out var spid);
+
+            blockingInfo = new BlockingProcessInfo
+            {
+                Spid = spid,
+                LoginName = blockingNode.Attribute("loginname")?.Value,
+                HostName = blockingNode.Attribute("hostname")?.Value,
+                DatabaseName = blockingNode.Attribute("currentdb")?.Value,
+                SqlText = blockingNode.Element("inputbuf")?.Value?.Trim(),
+                Status = blockingNode.Attribute("status")?.Value
+            };
+        }
+
+        return new BlockingEvent
+        {
+            EventTimestamp = timestamp,
+            BlockedProcess = blockedInfo,
+            BlockingProcess = blockingInfo,
+            RawXml = xmlString
+        };
+    }
+
+    // ──────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────
 
     private static string BuildPredicateClause(SessionConfig config)
     {
@@ -560,6 +884,17 @@ public partial class ProfilerService : IProfilerService
             < 1024 * 1024 => $"{bytes / 1024.0:F1}KB",
             < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1}MB",
             _ => $"{bytes / (1024.0 * 1024 * 1024):F2}GB"
+        };
+    }
+
+    public static string FormatMilliseconds(long ms)
+    {
+        return ms switch
+        {
+            < 1000 => $"{ms}ms",
+            < 60_000 => $"{ms / 1000.0:F2}s",
+            < 3_600_000 => $"{ms / 60_000.0:F1}min",
+            _ => $"{ms / 3_600_000.0:F1}hr"
         };
     }
 }

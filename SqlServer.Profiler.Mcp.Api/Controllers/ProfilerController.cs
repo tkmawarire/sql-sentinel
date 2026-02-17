@@ -5,7 +5,7 @@ using SqlServer.Profiler.Mcp.Tools;
 namespace SqlServer.Profiler.Mcp.Api.Controllers;
 
 /// <summary>
-/// REST API endpoints that map 1:1 to SQL Profiler MCP tools for debugging without an AI agent.
+/// REST API endpoints that map 1:1 to SQL Sentinel MCP tools for debugging without an AI agent.
 /// </summary>
 [ApiController]
 [Route("api")]
@@ -14,17 +14,20 @@ public class ProfilerController : ControllerBase
     private readonly SessionManagementTools _sessionTools;
     private readonly EventRetrievalTools _eventTools;
     private readonly PermissionTools _permissionTools;
+    private readonly DiagnosticTools _diagnosticTools;
     private readonly IConfiguration _configuration;
 
     public ProfilerController(
         SessionManagementTools sessionTools,
         EventRetrievalTools eventTools,
         PermissionTools permissionTools,
+        DiagnosticTools diagnosticTools,
         IConfiguration configuration)
     {
         _sessionTools = sessionTools;
         _eventTools = eventTools;
         _permissionTools = permissionTools;
+        _diagnosticTools = diagnosticTools;
         _configuration = configuration;
     }
 
@@ -32,13 +35,13 @@ public class ProfilerController : ControllerBase
     {
         if (!string.IsNullOrWhiteSpace(connectionString))
             return connectionString;
-        var configured = _configuration["SqlProfiler:ConnectionString"];
+        var configured = _configuration["SqlSentinel:ConnectionString"];
         if (!string.IsNullOrWhiteSpace(configured))
             return configured;
-        var envVar = Environment.GetEnvironmentVariable("SQL_PROFILER_CONNECTION_STRING");
+        var envVar = Environment.GetEnvironmentVariable("SQL_SENTINEL_CONNECTION_STRING");
         if (!string.IsNullOrWhiteSpace(envVar))
             return envVar;
-        throw new InvalidOperationException("No connection string provided. Pass connectionString parameter, set SqlProfiler:ConnectionString in config, or set SQL_PROFILER_CONNECTION_STRING environment variable.");
+        throw new InvalidOperationException("No connection string provided. Pass connectionString parameter, set SqlSentinel:ConnectionString in config, or set SQL_SENTINEL_CONNECTION_STRING environment variable.");
     }
 
     private ContentResult JsonContent(string json)
@@ -69,7 +72,8 @@ public class ProfilerController : ControllerBase
             request.MinDurationMs,
             request.ExcludeNoise,
             request.ExcludePatterns,
-            request.RingBufferMb);
+            request.RingBufferMb,
+            request.EventTypes);
         return JsonContent(result);
     }
 
@@ -151,7 +155,8 @@ public class ProfilerController : ControllerBase
             request.Logins,
             request.MinDurationMs,
             request.ExcludeNoise,
-            request.RingBufferMb);
+            request.RingBufferMb,
+            request.EventTypes);
         return JsonContent(result);
     }
 
@@ -307,6 +312,71 @@ public class ProfilerController : ControllerBase
     {
         var connStr = ResolveConnectionString(request.ConnectionString);
         var result = await _permissionTools.GrantPermissions(connStr, request.TargetLogin);
+        return JsonContent(result);
+    }
+
+    // ──────────────────────────────────────────────
+    // Diagnostics
+    // ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Retrieve deadlock events from a profiling session.
+    /// </summary>
+    [HttpGet("sessions/{sessionName}/deadlocks")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> GetDeadlocks(
+        [FromRoute] string sessionName,
+        [FromQuery] string? connectionString = null,
+        [FromQuery] string responseFormat = "Markdown")
+    {
+        var connStr = ResolveConnectionString(connectionString);
+        var result = await _diagnosticTools.GetDeadlocks(sessionName, connStr, responseFormat);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Retrieve blocked process events from a profiling session.
+    /// </summary>
+    [HttpGet("sessions/{sessionName}/blocking")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> GetBlocking(
+        [FromRoute] string sessionName,
+        [FromQuery] string? connectionString = null,
+        [FromQuery] string responseFormat = "Markdown")
+    {
+        var connStr = ResolveConnectionString(connectionString);
+        var result = await _diagnosticTools.GetBlocking(sessionName, connStr, responseFormat);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Query sys.dm_os_wait_stats. Does not require a profiling session.
+    /// </summary>
+    [HttpGet("wait-stats")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> GetWaitStats(
+        [FromQuery] string? connectionString = null,
+        [FromQuery] int topN = 20,
+        [FromQuery] string responseFormat = "Markdown")
+    {
+        var connStr = ResolveConnectionString(connectionString);
+        var result = await _diagnosticTools.GetWaitStats(connStr, topN, responseFormat);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Comprehensive health check: slow queries, deadlocks, blocking, wait stats, and insights.
+    /// </summary>
+    [HttpGet("health")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> HealthCheck(
+        [FromQuery] string? connectionString = null,
+        [FromQuery] string? sessionName = null,
+        [FromQuery] int slowQueryThresholdMs = 1000,
+        [FromQuery] string responseFormat = "Markdown")
+    {
+        var connStr = ResolveConnectionString(connectionString);
+        var result = await _diagnosticTools.HealthCheck(connStr, sessionName ?? "", slowQueryThresholdMs, responseFormat);
         return JsonContent(result);
     }
 }

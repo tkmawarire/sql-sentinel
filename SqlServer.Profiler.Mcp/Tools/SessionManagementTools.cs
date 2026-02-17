@@ -47,16 +47,16 @@ public class SessionManagementTools
 
     /// <summary>
     /// Create a new SQL Server profiling session using Extended Events.
-    /// The session is created but not started. Use sqlprofiler_start_session to begin capture.
+    /// The session is created but not started. Use sqlsentinel_start_session to begin capture.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_create_session")]
+    [McpServerTool(Name = "sqlsentinel_create_session")]
     [Description("""
         Create a new SQL Server profiling session using Extended Events.
         
         This creates a server-side event session that captures SQL queries, stored procedure calls, 
         and other database events with minimal overhead (~1-2%).
         
-        The session is created but NOT started. Use sqlprofiler_start_session to begin capture.
+        The session is created but NOT started. Use sqlsentinel_start_session to begin capture.
         
         Connection string format: "Server=localhost;Database=master;User Id=sa;Password=xxx;TrustServerCertificate=true"
         Or for Windows auth: "Server=localhost;Database=master;Integrated Security=true;TrustServerCertificate=true"
@@ -71,7 +71,8 @@ public class SessionManagementTools
         [Description("Minimum query duration in milliseconds. Use to filter out fast queries. Default 0 = all.")] int minDurationMs = 0,
         [Description("Auto-exclude common noise (sp_reset_connection, SET statements, etc.). Default true.")] bool excludeNoise = true,
         [Description("Additional regex patterns to exclude (comma-separated).")] string? excludePatterns = null,
-        [Description("Ring buffer size in MB. Larger = more events but more memory. Default 50.")] int ringBufferMb = 50)
+        [Description("Ring buffer size in MB. Larger = more events but more memory. Default 50.")] int ringBufferMb = 50,
+        [Description("Event types to capture (comma-separated). Options: SqlBatchCompleted, RpcCompleted, SqlStatementCompleted, SpStatementCompleted, Attention, ErrorReported, Deadlock, BlockedProcess, LoginEvent, SchemaChange, Recompile, AutoStats, All. Default: SqlBatchCompleted,RpcCompleted")] string? eventTypes = null)
     {
         try
         {
@@ -80,6 +81,8 @@ public class SessionManagementTools
             {
                 allExcludePatterns.AddRange(excludePatterns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             }
+
+            var parsedEventTypes = ParseEventTypes(eventTypes);
 
             var config = new SessionConfig
             {
@@ -90,6 +93,7 @@ public class SessionManagementTools
                 Hosts = ParseList(hosts),
                 MinDurationMs = minDurationMs,
                 ExcludePatterns = allExcludePatterns,
+                EventTypes = parsedEventTypes,
                 RingBufferMb = ringBufferMb
             };
 
@@ -102,6 +106,7 @@ public class SessionManagementTools
                 applications = config.Applications,
                 logins = config.Logins,
                 minDurationMs = config.MinDurationMs,
+                eventTypes = config.EventTypes.Select(e => e.ToString()),
                 excludeNoise,
                 ringBufferMb = config.RingBufferMb
             };
@@ -122,8 +127,8 @@ public class SessionManagementTools
     /// <summary>
     /// Start capturing events for an existing profiling session.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_start_session")]
-    [Description("Start capturing events for an existing profiling session. The session must have been created first with sqlprofiler_create_session.")]
+    [McpServerTool(Name = "sqlsentinel_start_session")]
+    [Description("Start capturing events for an existing profiling session. The session must have been created first with sqlsentinel_create_session.")]
     public async Task<string> StartSession(
         [Description("Name of the profiling session")] string sessionName,
         [Description("SQL Server connection string")] string connectionString)
@@ -139,7 +144,7 @@ public class SessionManagementTools
             {
                 success = false,
                 error = ex.Message,
-                suggestion = "Ensure session exists (use sqlprofiler_list_sessions) and you have ALTER ANY EVENT SESSION permission."
+                suggestion = "Ensure session exists (use sqlsentinel_list_sessions) and you have ALTER ANY EVENT SESSION permission."
             }, JsonOptions.Default);
         }
     }
@@ -147,8 +152,8 @@ public class SessionManagementTools
     /// <summary>
     /// Stop capturing events for a profiling session.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_stop_session")]
-    [Description("Stop capturing events for a profiling session. Events captured so far are retained. Use sqlprofiler_drop_session to completely remove the session.")]
+    [McpServerTool(Name = "sqlsentinel_stop_session")]
+    [Description("Stop capturing events for a profiling session. Events captured so far are retained. Use sqlsentinel_drop_session to completely remove the session.")]
     public async Task<string> StopSession(
         [Description("Name of the profiling session")] string sessionName,
         [Description("SQL Server connection string")] string connectionString)
@@ -171,8 +176,8 @@ public class SessionManagementTools
     /// <summary>
     /// Drop a profiling session and discard all captured events.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_drop_session")]
-    [Description("Drop a profiling session and discard all captured events. WARNING: This permanently deletes all captured events. Retrieve any needed data with sqlprofiler_get_events before dropping.")]
+    [McpServerTool(Name = "sqlsentinel_drop_session")]
+    [Description("Drop a profiling session and discard all captured events. WARNING: This permanently deletes all captured events. Retrieve any needed data with sqlsentinel_get_events before dropping.")]
     public async Task<string> DropSession(
         [Description("Name of the profiling session")] string sessionName,
         [Description("SQL Server connection string")] string connectionString)
@@ -196,7 +201,7 @@ public class SessionManagementTools
     /// <summary>
     /// List all profiling sessions created by this MCP server.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_list_sessions")]
+    [McpServerTool(Name = "sqlsentinel_list_sessions")]
     [Description("List all profiling sessions created by this MCP server. Shows session name, state (RUNNING/STOPPED), and buffer usage.")]
     public async Task<string> ListSessions(
         [Description("SQL Server connection string")] string connectionString)
@@ -208,7 +213,7 @@ public class SessionManagementTools
             {
                 sessions,
                 count = sessions.Count,
-                message = $"Found {sessions.Count} MCP profiler session(s)"
+                message = $"Found {sessions.Count} SQL Sentinel session(s)"
             }, JsonOptions.Default);
         }
         catch (Exception ex)
@@ -224,7 +229,7 @@ public class SessionManagementTools
     /// <summary>
     /// Create AND start a profiling session in one step.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_quick_capture")]
+    [McpServerTool(Name = "sqlsentinel_quick_capture")]
     [Description("Create AND start a profiling session in one step. Convenience tool for rapid debugging. Creates a session with specified filters and immediately begins capture.")]
     public async Task<string> QuickCapture(
         [Description("Unique name for this session")] string sessionName,
@@ -234,11 +239,13 @@ public class SessionManagementTools
         [Description("Filter to specific SQL logins (comma-separated)")] string? logins = null,
         [Description("Minimum query duration in milliseconds")] int minDurationMs = 0,
         [Description("Auto-exclude common noise")] bool excludeNoise = true,
-        [Description("Ring buffer size in MB")] int ringBufferMb = 50)
+        [Description("Ring buffer size in MB")] int ringBufferMb = 50,
+        [Description("Event types to capture (comma-separated). Default: SqlBatchCompleted,RpcCompleted")] string? eventTypes = null)
     {
         try
         {
             var allExcludePatterns = excludeNoise ? new List<string>(NoisePatterns.Default) : [];
+            var parsedEventTypes = ParseEventTypes(eventTypes);
 
             var config = new SessionConfig
             {
@@ -248,6 +255,7 @@ public class SessionManagementTools
                 Logins = ParseList(logins),
                 MinDurationMs = minDurationMs,
                 ExcludePatterns = allExcludePatterns,
+                EventTypes = parsedEventTypes,
                 RingBufferMb = ringBufferMb
             };
 
@@ -261,7 +269,7 @@ public class SessionManagementTools
                 sessionName,
                 status = "RUNNING",
                 startedAt = startResult["startedAt"],
-                message = $"Session '{sessionName}' created and capturing. Use sqlprofiler_get_events to retrieve queries.",
+                message = $"Session '{sessionName}' created and capturing. Use sqlsentinel_get_events to retrieve queries.",
                 config = new
                 {
                     databases = config.Databases,
@@ -287,6 +295,21 @@ public class SessionManagementTools
             return [];
 
         return input.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
+    private static List<EventType> ParseEventTypes(string? eventTypes)
+    {
+        if (string.IsNullOrWhiteSpace(eventTypes))
+            return [EventType.SqlBatchCompleted, EventType.RpcCompleted];
+
+        var parsed = new List<EventType>();
+        foreach (var et in eventTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (Enum.TryParse<EventType>(et, ignoreCase: true, out var eventType))
+                parsed.Add(eventType);
+        }
+
+        return parsed.Count > 0 ? parsed : [EventType.SqlBatchCompleted, EventType.RpcCompleted];
     }
 }
 

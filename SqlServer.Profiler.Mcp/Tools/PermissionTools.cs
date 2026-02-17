@@ -18,11 +18,11 @@ public partial class PermissionTools
         "VIEW SERVER STATE"
     ];
 
-    [McpServerTool(Name = "sqlprofiler_check_permissions")]
+    [McpServerTool(Name = "sqlsentinel_check_permissions")]
     [Description("""
         Check if the current SQL Server login has the required permissions for profiling.
 
-        Required permissions for SQL Profiler MCP:
+        Required permissions for SQL Sentinel:
         - ALTER ANY EVENT SESSION: Create, modify, and drop Extended Events sessions
         - VIEW SERVER STATE: Read from ring buffer targets and DMVs
 
@@ -90,7 +90,7 @@ public partial class PermissionTools
 
             if (allGranted)
             {
-                result["message"] = "All required permissions are granted. You can use all SQL Profiler MCP tools.";
+                result["message"] = "All required permissions are granted. You can use all SQL Sentinel tools.";
             }
             else
             {
@@ -98,7 +98,26 @@ public partial class PermissionTools
                 result["grantStatements"] = missingPermissions
                     .Select(p => $"GRANT {p} TO [{EscapeBrackets(currentLogin)}];")
                     .ToList();
-                result["suggestion"] = "Run the grant statements using a sysadmin connection, or use sqlprofiler_grant_permissions tool.";
+                result["suggestion"] = "Run the grant statements using a sysadmin connection, or use sqlsentinel_grant_permissions tool.";
+            }
+
+            // Check blocked process threshold setting
+            try
+            {
+                await using var bptCmd = new SqlCommand(
+                    "SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'blocked process threshold (s)'",
+                    conn);
+                var bptValue = await bptCmd.ExecuteScalarAsync();
+                var threshold = bptValue is int val ? val : 0;
+                result["blockedProcessThreshold"] = threshold;
+                if (threshold == 0)
+                {
+                    result["blockedProcessWarning"] = "Blocked process threshold is 0 (disabled). To capture blocking events, run: EXEC sp_configure 'blocked process threshold', 5; RECONFIGURE;";
+                }
+            }
+            catch
+            {
+                // Non-critical — skip if we can't read the config
             }
 
             return JsonSerializer.Serialize(result, JsonOptions.Default);
@@ -114,7 +133,7 @@ public partial class PermissionTools
         }
     }
 
-    [McpServerTool(Name = "sqlprofiler_grant_permissions")]
+    [McpServerTool(Name = "sqlsentinel_grant_permissions")]
     [Description("""
         Grant the required profiling permissions to a specified SQL Server login.
 
@@ -225,7 +244,7 @@ public partial class PermissionTools
                     targetLogin,
                     grantedBy = grantingLogin,
                     permissionsGranted = grantedPermissions,
-                    message = $"Successfully granted profiling permissions to [{targetLogin}]. The login can now use all SQL Profiler MCP tools."
+                    message = $"Successfully granted profiling permissions to [{targetLogin}]. The login can now use all SQL Sentinel tools."
                 }, JsonOptions.Default);
             }
             else if (grantedPermissions.Count > 0)

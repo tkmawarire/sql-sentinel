@@ -54,6 +54,12 @@ public class CreateSessionRequest
     /// Ring buffer size in MB. Larger = more events but more memory. Default 50.
     /// </summary>
     public int RingBufferMb { get; set; } = 50;
+
+    /// <summary>
+    /// Event types to capture (comma-separated). Options: SqlBatchCompleted, RpcCompleted, Deadlock, BlockedProcess, etc.
+    /// Default: SqlBatchCompleted,RpcCompleted
+    /// </summary>
+    public string? EventTypes { get; set; }
 }
 
 /// <summary>
@@ -100,6 +106,11 @@ public class QuickCaptureRequest
     /// Ring buffer size in MB. Default 50.
     /// </summary>
     public int RingBufferMb { get; set; } = 50;
+
+    /// <summary>
+    /// Event types to capture (comma-separated). Default: SqlBatchCompleted,RpcCompleted
+    /// </summary>
+    public string? EventTypes { get; set; }
 }
 
 /// <summary>

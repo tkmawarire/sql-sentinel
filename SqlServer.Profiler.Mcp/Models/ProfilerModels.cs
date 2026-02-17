@@ -24,6 +24,12 @@ public enum EventType
     SpStatementCompleted,
     Attention,
     ErrorReported,
+    Deadlock,
+    BlockedProcess,
+    LoginEvent,
+    SchemaChange,
+    Recompile,
+    AutoStats,
     All
 }
 
@@ -176,4 +182,127 @@ public record ActiveSession
     public long Writes { get; init; }
     public DateTime? LoginTime { get; init; }
     public DateTime? LastRequestStartTime { get; init; }
+}
+
+/// <summary>
+/// Represents a parsed deadlock event from xml_deadlock_report.
+/// </summary>
+public record DeadlockEvent
+{
+    public DateTime? EventTimestamp { get; init; }
+    public string VictimSpid { get; init; } = "";
+    public List<DeadlockProcess> Processes { get; init; } = [];
+    public string RawXml { get; init; } = "";
+}
+
+/// <summary>
+/// A process involved in a deadlock.
+/// </summary>
+public record DeadlockProcess
+{
+    public string ProcessId { get; init; } = "";
+    public int Spid { get; init; }
+    public string? LoginName { get; init; }
+    public string? HostName { get; init; }
+    public string? ApplicationName { get; init; }
+    public string? DatabaseName { get; init; }
+    public string? WaitResource { get; init; }
+    public string? LockMode { get; init; }
+    public int WaitTime { get; init; }
+    public string? SqlText { get; init; }
+    public bool IsVictim { get; init; }
+}
+
+/// <summary>
+/// Represents a blocked process report event.
+/// </summary>
+public record BlockingEvent
+{
+    public DateTime? EventTimestamp { get; init; }
+    public BlockedProcessInfo BlockedProcess { get; init; } = new();
+    public BlockingProcessInfo BlockingProcess { get; init; } = new();
+    public string RawXml { get; init; } = "";
+}
+
+/// <summary>
+/// Details of the blocked process.
+/// </summary>
+public record BlockedProcessInfo
+{
+    public int Spid { get; init; }
+    public string? WaitResource { get; init; }
+    public int WaitTimeMs { get; init; }
+    public string? LoginName { get; init; }
+    public string? HostName { get; init; }
+    public string? DatabaseName { get; init; }
+    public string? SqlText { get; init; }
+    public string? LockMode { get; init; }
+}
+
+/// <summary>
+/// Details of the blocking process.
+/// </summary>
+public record BlockingProcessInfo
+{
+    public int Spid { get; init; }
+    public string? LoginName { get; init; }
+    public string? HostName { get; init; }
+    public string? DatabaseName { get; init; }
+    public string? SqlText { get; init; }
+    public string? Status { get; init; }
+}
+
+/// <summary>
+/// A wait statistics entry from sys.dm_os_wait_stats.
+/// </summary>
+public record WaitStatEntry
+{
+    public required string WaitType { get; init; }
+    public string WaitCategory { get; init; } = "Other";
+    public long WaitingTasksCount { get; init; }
+    public long WaitTimeMs { get; init; }
+    public long MaxWaitTimeMs { get; init; }
+    public long SignalWaitTimeMs { get; init; }
+    public string WaitTimeFormatted { get; init; } = "";
+    public string MaxWaitTimeFormatted { get; init; } = "";
+}
+
+/// <summary>
+/// Currently active blocking from DMVs.
+/// </summary>
+public record ActiveBlockingInfo
+{
+    public int BlockedSpid { get; init; }
+    public int BlockingSpid { get; init; }
+    public string? WaitType { get; init; }
+    public long WaitTimeMs { get; init; }
+    public string? WaitResource { get; init; }
+    public string? BlockedLoginName { get; init; }
+    public string? BlockedDatabase { get; init; }
+    public string? BlockedSqlText { get; init; }
+}
+
+/// <summary>
+/// Comprehensive health check result.
+/// </summary>
+public record HealthCheckResult
+{
+    public DateTime CheckedAt { get; init; } = DateTime.UtcNow;
+    public List<QueryStats> SlowestQueries { get; init; } = [];
+    public List<DeadlockEvent> RecentDeadlocks { get; init; } = [];
+    public List<BlockingEvent> RecentBlocking { get; init; } = [];
+    public List<WaitStatEntry> TopWaitStats { get; init; } = [];
+    public List<ActiveBlockingInfo> ActiveBlocking { get; init; } = [];
+    public List<HealthInsight> Insights { get; init; } = [];
+}
+
+/// <summary>
+/// An actionable insight from diagnostic analysis.
+/// </summary>
+public record HealthInsight
+{
+    public required string Severity { get; init; }
+    public required string Category { get; init; }
+    public required string Message { get; init; }
+    public string? Detail { get; init; }
 }

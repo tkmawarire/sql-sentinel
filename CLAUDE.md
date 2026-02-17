@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SQL Server Profiler MCP Server - a .NET 9 MCP (Model Context Protocol) server for SQL Server query profiling using Extended Events. Uses Microsoft.Data.SqlClient for native SQL Server connectivity (no ODBC drivers required).
+SQL Sentinel MCP Server (v2.0.0) - a .NET 9 MCP (Model Context Protocol) server for SQL Server monitoring using Extended Events. Provides query profiling, deadlock detection, blocking analysis, wait stats, and intelligent diagnostics. Uses Microsoft.Data.SqlClient for native SQL Server connectivity (no ODBC drivers required).
 
 ## Build Commands
 
@@ -32,12 +32,14 @@ Program.cs                          # Entry point, DI setup, MCP server config
 ├── Services/
 │   ├── ProfilerService.cs          # Core Extended Events logic (IProfilerService)
 │   ├── QueryFingerprintService.cs  # SQL normalization & fingerprinting (IQueryFingerprintService)
+│   ├── WaitStatsService.cs         # DMV-based wait stats analysis (IWaitStatsService)
 │   └── SessionConfigStore.cs       # In-memory session config storage
 ├── Models/
-│   └── ProfilerModels.cs           # Records, enums (SessionConfig, ProfilerEvent, EventFilters, etc.)
+│   └── ProfilerModels.cs           # Records, enums (SessionConfig, ProfilerEvent, DeadlockEvent, etc.)
 └── Tools/
     ├── SessionManagementTools.cs   # MCP tools: create/start/stop/drop/list/quick_capture
     ├── EventRetrievalTools.cs      # MCP tools: get_events/get_stats/analyze_sequence/get_connection_info
+    ├── DiagnosticTools.cs          # MCP tools: get_deadlocks/get_blocking/get_wait_stats/health_check
     └── PermissionTools.cs          # MCP tools: check_permissions/grant_permissions
 ```
 
@@ -46,6 +48,8 @@ Program.cs                          # Entry point, DI setup, MCP server config
 - MCP tools auto-discovered from assembly via `WithToolsFromAssembly()`
 - Logging to stderr (stdout reserved for MCP protocol)
 - All tools return JSON with optional Markdown formatting
+- XE session prefix: `mcp_sentinel_`
+- Two event definition shapes: standard events (query/login/recompile) and XML-payload events (deadlock/blocking)
 
 ## SQL Server Requirements
 
@@ -55,11 +59,18 @@ Program.cs                          # Entry point, DI setup, MCP server config
   GRANT ALTER ANY EVENT SESSION TO [your_login];
   GRANT VIEW SERVER STATE TO [your_login];
   ```
+- For blocked process detection: `EXEC sp_configure 'blocked process threshold', 5; RECONFIGURE;`
 
 ## MCP Tools Summary
 
-**Session lifecycle:** `sqlprofiler_create_session`, `sqlprofiler_start_session`, `sqlprofiler_stop_session`, `sqlprofiler_drop_session`, `sqlprofiler_list_sessions`, `sqlprofiler_quick_capture`
+**Session lifecycle:** `sqlsentinel_create_session`, `sqlsentinel_start_session`, `sqlsentinel_stop_session`, `sqlsentinel_drop_session`, `sqlsentinel_list_sessions`, `sqlsentinel_quick_capture`
 
-**Event retrieval:** `sqlprofiler_get_events`, `sqlprofiler_get_stats`, `sqlprofiler_analyze_sequence`, `sqlprofiler_get_connection_info`
+**Event retrieval:** `sqlsentinel_get_events`, `sqlsentinel_get_stats`, `sqlsentinel_analyze_sequence`, `sqlsentinel_get_connection_info`
 
-**Permissions:** `sqlprofiler_check_permissions`, `sqlprofiler_grant_permissions`
+**Diagnostics:** `sqlsentinel_get_deadlocks`, `sqlsentinel_get_blocking`, `sqlsentinel_get_wait_stats`, `sqlsentinel_health_check`
+
+**Permissions:** `sqlsentinel_check_permissions`, `sqlsentinel_grant_permissions`
+
+## Supported Event Types
+
+`SqlBatchCompleted`, `RpcCompleted`, `SqlBatchStarting`, `RpcStarting`, `ErrorReported`, `AttentionEvent`, `Deadlock`, `BlockedProcess`, `LoginEvent`, `SchemaChange`, `Recompile`, `AutoStats`

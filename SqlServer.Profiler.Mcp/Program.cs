@@ -8,15 +8,16 @@ using SqlServer.Profiler.Mcp.Tools;
 namespace SqlServer.Profiler.Mcp;
 
 /// <summary>
-/// SQL Server Profiler MCP Server
-/// 
-/// A production-ready MCP server for SQL Server query profiling using Extended Events.
+/// SQL Sentinel MCP Server
+///
+/// A production-ready MCP server for SQL Server monitoring using Extended Events.
 /// Uses Microsoft.Data.SqlClient for native connectivity - NO ODBC DRIVERS REQUIRED.
-/// 
+///
 /// Features:
 /// - Extended Events based (modern, low overhead, not deprecated)
 /// - Session lifecycle management
 /// - Rich filtering (app, database, user, duration, text patterns)
+/// - Deadlock detection, blocking analysis, wait statistics
 /// - AI-optimized output with query fingerprinting
 /// - Production-safe with noise filtering
 /// </summary>
@@ -37,6 +38,7 @@ public class Program
         // Register services
         builder.Services.AddSingleton<IProfilerService, ProfilerService>();
         builder.Services.AddSingleton<IQueryFingerprintService, QueryFingerprintService>();
+        builder.Services.AddSingleton<IWaitStatsService, WaitStatsService>();
         builder.Services.AddSingleton<SessionConfigStore>();
 
         // Register MCP Server
@@ -44,8 +46,8 @@ public class Program
         {
             options.ServerInfo = new()
             {
-                Name = "sqlserver-profiler-mcp",
-                Version = "1.0.0"
+                Name = "sql-sentinel-mcp",
+                Version = "2.0.0"
             };
         })
         .WithStdioServerTransport()

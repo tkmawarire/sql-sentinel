@@ -30,7 +30,7 @@ public class EventRetrievalTools
     /// <summary>
     /// Retrieve captured events from a profiling session with filtering.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_get_events")]
+    [McpServerTool(Name = "sqlsentinel_get_events")]
     [Description("""
         Retrieve captured events from a profiling session with filtering.
         
@@ -111,7 +111,7 @@ public class EventRetrievalTools
             {
                 success = false,
                 error = ex.Message,
-                suggestion = "Ensure session exists and is running. Check sqlprofiler_list_sessions."
+                suggestion = "Ensure session exists and is running. Check sqlsentinel_list_sessions."
             }, JsonOptions.Default);
         }
     }
@@ -119,7 +119,7 @@ public class EventRetrievalTools
     /// <summary>
     /// Get aggregate statistics from captured events.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_get_stats")]
+    [McpServerTool(Name = "sqlsentinel_get_stats")]
     [Description("""
         Get aggregate statistics from captured events.
         
@@ -133,7 +133,9 @@ public class EventRetrievalTools
         [Description("Analysis window end (ISO format)")] string? endTime = null,
         [Description("Group by: QueryFingerprint, Database, Application, Login, or None")] string groupBy = "QueryFingerprint",
         [Description("Return top N results")] int topN = 20,
-        [Description("Output format: Json or Markdown")] string responseFormat = "Markdown")
+        [Description("Output format: Json or Markdown")] string responseFormat = "Markdown",
+        [Description("Flag queries slower than this threshold (ms). Default 1000.")] int slowQueryThresholdMs = 1000,
+        [Description("Flag queries with logical reads above this threshold. Default 10000.")] int excessiveReadsThreshold = 10000)
     {
         try
         {
@@ -208,6 +210,44 @@ public class EventRetrievalTools
                 .Take(topN)
                 .ToList();
 
+            // Generate insights
+            var insights = new List<HealthInsight>();
+            foreach (var stat in stats)
+            {
+                if (stat.AvgDurationUs > slowQueryThresholdMs * 1000L)
+                {
+                    insights.Add(new HealthInsight
+                    {
+                        Severity = "Warning",
+                        Category = "Performance",
+                        Message = $"Slow query: avg {stat.AvgDurationFormatted}, max {stat.MaxDurationFormatted}",
+                        Detail = stat.SampleSql.Length > 100 ? stat.SampleSql[..100] : stat.SampleSql
+                    });
+                }
+
+                if (stat.Count > 100 && stat.AvgDurationUs > 100_000)
+                {
+                    insights.Add(new HealthInsight
+                    {
+                        Severity = "Warning",
+                        Category = "Pattern",
+                        Message = $"High-frequency query: {stat.Count} executions — potential N+1 pattern",
+                        Detail = stat.SampleSql.Length > 100 ? stat.SampleSql[..100] : stat.SampleSql
+                    });
+                }
+
+                if (stat.Count > 0 && stat.TotalReads / stat.Count > excessiveReadsThreshold)
+                {
+                    insights.Add(new HealthInsight
+                    {
+                        Severity = "Warning",
+                        Category = "Performance",
+                        Message = $"Excessive reads: avg {stat.TotalReads / stat.Count:N0} logical reads/execution",
+                        Detail = stat.SampleSql.Length > 100 ? stat.SampleSql[..100] : stat.SampleSql
+                    });
+                }
+            }
+
             var summary = new
             {
                 totalEvents = events.Count,
@@ -226,11 +266,11 @@ public class EventRetrievalTools
                 }
             };
 
-            var result = new { summary, groupBy, topN, stats };
+            var result = new { summary, groupBy, topN, stats, insights };
 
             if (responseFormat.Equals("Markdown", StringComparison.OrdinalIgnoreCase))
             {
-                return FormatStatsMarkdown(summary, groupBy, topN, stats);
+                return FormatStatsMarkdown(summary, groupBy, topN, stats, insights);
             }
 
             return JsonSerializer.Serialize(result, JsonOptions.Default);
@@ -248,7 +288,7 @@ public class EventRetrievalTools
     /// <summary>
     /// Analyze the sequence and timing of queries for a specific operation.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_analyze_sequence")]
+    [McpServerTool(Name = "sqlsentinel_analyze_sequence")]
     [Description("""
         Analyze the sequence and timing of queries for a specific operation.
         
@@ -382,15 +422,15 @@ public class EventRetrievalTools
     /// <summary>
     /// Get information about databases, applications, logins, or active sessions.
     /// </summary>
-    [McpServerTool(Name = "sqlprofiler_get_connection_info")]
+    [McpServerTool(Name = "sqlsentinel_get_connection_info")]
     [Description("""
-        Get information about databases, applications, logins, or active sessions.
-        
-        Useful for understanding what's connected to the server and for configuring session filters.
+        Get information about databases, applications, logins, active sessions, or current blocking.
+
+        Useful for understanding what's connected to the server and for identifying active blocking chains.
         """)]
     public async Task<string> GetConnectionInfo(
         [Description("SQL Server connection string")] string connectionString,
-        [Description("What to retrieve: databases, applications, logins, sessions, or all")] string infoType = "all")
+        [Description("What to retrieve: databases, applications, logins, sessions, blocking, or all")] string infoType = "all")
     {
         try
         {
@@ -502,7 +542,7 @@ public class EventRetrievalTools
         return sb.ToString();
     }
 
-    private static string FormatStatsMarkdown(dynamic summary, string groupBy, int topN, List<QueryStats> stats)
+    private static string FormatStatsMarkdown(dynamic summary, string groupBy, int topN, List<QueryStats> stats, List<HealthInsight>? insights = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("# Query Statistics");
@@ -511,6 +551,18 @@ public class EventRetrievalTools
         sb.AppendLine($"**Total Duration:** {ProfilerService.FormatDuration(summary.totals.durationUs)} | **Total CPU:** {ProfilerService.FormatDuration(summary.totals.cpuUs)}");
         sb.AppendLine($"**Total Reads:** {summary.totals.reads:N0} | **Total Writes:** {summary.totals.writes:N0}");
         sb.AppendLine();
+
+        if (insights != null && insights.Count > 0)
+        {
+            sb.AppendLine("## Insights");
+            sb.AppendLine();
+            foreach (var insight in insights)
+            {
+                sb.AppendLine($"- **[{insight.Severity.ToUpperInvariant()}]** [{insight.Category}] {insight.Message}");
+            }
+            sb.AppendLine();
+        }
+
         sb.AppendLine($"## Top {topN} by {groupBy}");
         sb.AppendLine();
 

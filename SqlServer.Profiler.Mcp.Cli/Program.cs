@@ -12,10 +12,12 @@ var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
 var services = new ServiceCollection();
 services.AddSingleton<IProfilerService, ProfilerService>();
 services.AddSingleton<IQueryFingerprintService, QueryFingerprintService>();
+services.AddSingleton<IWaitStatsService, WaitStatsService>();
 services.AddSingleton<SessionConfigStore>();
 services.AddTransient<SessionManagementTools>();
 services.AddTransient<EventRetrievalTools>();
 services.AddTransient<PermissionTools>();
+services.AddTransient<DiagnosticTools>();
 var provider = services.BuildServiceProvider();
 
 // Discover all MCP tools via reflection
@@ -56,8 +58,8 @@ Dictionary<string, (Type ToolType, MethodInfo Method, string FullName, string De
                 continue;
 
             var fullName = toolAttr.Name ?? method.Name;
-            var shortName = fullName.StartsWith("sqlprofiler_", StringComparison.OrdinalIgnoreCase)
-                ? fullName["sqlprofiler_".Length..]
+            var shortName = fullName.StartsWith("sqlsentinel_", StringComparison.OrdinalIgnoreCase)
+                ? fullName["sqlsentinel_".Length..]
                 : fullName;
 
             var description = method.GetCustomAttribute<DescriptionAttribute>()?.Description?.Trim() ?? "";
@@ -113,10 +115,10 @@ async Task<int> RunScriptMode(string[] cliArgs)
 
 async Task RunReplMode()
 {
-    Console.WriteLine("SQL Profiler Debug CLI");
+    Console.WriteLine("SQL Sentinel Debug CLI");
     Console.WriteLine();
 
-    var connectionString = Environment.GetEnvironmentVariable("SQL_PROFILER_CONNECTION_STRING");
+    var connectionString = Environment.GetEnvironmentVariable("SQL_SENTINEL_CONNECTION_STRING");
     if (string.IsNullOrWhiteSpace(connectionString))
     {
         Console.Write("Connection string: ");
@@ -374,12 +376,12 @@ string[] InjectConnectionString(string[] cliArgs, string connectionString)
 void PrintUsage()
 {
     Console.WriteLine("Usage:");
-    Console.WriteLine("  SqlServer.Profiler.Mcp.Cli list                         List all available tools");
-    Console.WriteLine("  SqlServer.Profiler.Mcp.Cli help <tool>                  Show tool parameter details");
-    Console.WriteLine("  SqlServer.Profiler.Mcp.Cli call <tool> [--param value]  Invoke a tool");
+    Console.WriteLine("  sql-sentinel-cli list                         List all available tools");
+    Console.WriteLine("  sql-sentinel-cli help <tool>                  Show tool parameter details");
+    Console.WriteLine("  sql-sentinel-cli call <tool> [--param value]  Invoke a tool");
     Console.WriteLine();
     Console.WriteLine("Environment:");
-    Console.WriteLine("  SQL_PROFILER_CONNECTION_STRING   Default connection string");
+    Console.WriteLine("  SQL_SENTINEL_CONNECTION_STRING   Default connection string");
     Console.WriteLine();
     Console.WriteLine("Run with no arguments for interactive REPL mode.");
 }
