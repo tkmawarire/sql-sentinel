@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Data.SqlClient;
 using SqlServer.Profiler.Mcp.Models;
@@ -11,15 +12,15 @@ namespace SqlServer.Profiler.Mcp.Services;
 /// </summary>
 public interface IProfilerService
 {
-    Task<Dictionary<string, object>> CreateSessionAsync(string connectionString, SessionConfig config);
-    Task<Dictionary<string, object>> StartSessionAsync(string connectionString, string sessionName);
-    Task<Dictionary<string, object>> StopSessionAsync(string connectionString, string sessionName);
-    Task<Dictionary<string, object>> DropSessionAsync(string connectionString, string sessionName);
-    Task<List<SessionInfo>> ListSessionsAsync(string connectionString);
-    Task<List<ProfilerEvent>> GetEventsAsync(string connectionString, string sessionName, EventFilters filters, List<string>? excludePatterns = null);
-    Task<Dictionary<string, object>> GetConnectionInfoAsync(string connectionString, string infoType);
-    Task<List<DeadlockEvent>> GetDeadlocksAsync(string connectionString, string sessionName);
-    Task<List<BlockingEvent>> GetBlockingEventsAsync(string connectionString, string sessionName);
+    Task<Dictionary<string, object>> CreateSessionAsync(string connectionString, SessionConfig config, CancellationToken ct = default);
+    Task<Dictionary<string, object>> StartSessionAsync(string connectionString, string sessionName, CancellationToken ct = default);
+    Task<Dictionary<string, object>> StopSessionAsync(string connectionString, string sessionName, CancellationToken ct = default);
+    Task<Dictionary<string, object>> DropSessionAsync(string connectionString, string sessionName, CancellationToken ct = default);
+    Task<List<SessionInfo>> ListSessionsAsync(string connectionString, CancellationToken ct = default);
+    Task<List<ProfilerEvent>> GetEventsAsync(string connectionString, string sessionName, EventFilters filters, List<string>? excludePatterns = null, CancellationToken ct = default);
+    Task<Dictionary<string, object>> GetConnectionInfoAsync(string connectionString, string infoType, CancellationToken ct = default);
+    Task<List<DeadlockEvent>> GetDeadlocksAsync(string connectionString, string sessionName, CancellationToken ct = default);
+    Task<List<BlockingEvent>> GetBlockingEventsAsync(string connectionString, string sessionName, CancellationToken ct = default);
 }
 
 public record EventFilters
@@ -73,20 +74,21 @@ public partial class ProfilerService : IProfilerService
         _fingerprintService = fingerprintService;
     }
 
-    public async Task<Dictionary<string, object>> CreateSessionAsync(string connectionString, SessionConfig config)
+    public async Task<Dictionary<string, object>> CreateSessionAsync(string connectionString, SessionConfig config, CancellationToken ct = default)
     {
         var fullSessionName = $"{SessionPrefix}{config.SessionName}";
 
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
         // Check if session already exists
         await using var checkCmd = new SqlCommand(
             "SELECT 1 FROM sys.server_event_sessions WHERE name = @name",
             conn);
         checkCmd.Parameters.AddWithValue("@name", fullSessionName);
+        checkCmd.CommandTimeout = 30;
 
-        if (await checkCmd.ExecuteScalarAsync() != null)
+        if (await checkCmd.ExecuteScalarAsync(ct) != null)
         {
             throw new InvalidOperationException(
                 $"Session '{config.SessionName}' already exists. Drop it first or use a different name.");
@@ -134,7 +136,8 @@ public partial class ProfilerService : IProfilerService
             """;
 
         await using var createCmd = new SqlCommand(createDdl, conn);
-        await createCmd.ExecuteNonQueryAsync();
+        createCmd.CommandTimeout = 30;
+        await createCmd.ExecuteNonQueryAsync(ct);
 
         return new Dictionary<string, object>
         {
@@ -145,17 +148,18 @@ public partial class ProfilerService : IProfilerService
         };
     }
 
-    public async Task<Dictionary<string, object>> StartSessionAsync(string connectionString, string sessionName)
+    public async Task<Dictionary<string, object>> StartSessionAsync(string connectionString, string sessionName, CancellationToken ct = default)
     {
         var fullSessionName = $"{SessionPrefix}{sessionName}";
 
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
         await using var cmd = new SqlCommand(
             $"ALTER EVENT SESSION [{fullSessionName}] ON SERVER STATE = START",
             conn);
-        await cmd.ExecuteNonQueryAsync();
+        cmd.CommandTimeout = 30;
+        await cmd.ExecuteNonQueryAsync(ct);
 
         return new Dictionary<string, object>
         {
@@ -166,17 +170,18 @@ public partial class ProfilerService : IProfilerService
         };
     }
 
-    public async Task<Dictionary<string, object>> StopSessionAsync(string connectionString, string sessionName)
+    public async Task<Dictionary<string, object>> StopSessionAsync(string connectionString, string sessionName, CancellationToken ct = default)
     {
         var fullSessionName = $"{SessionPrefix}{sessionName}";
 
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
         await using var cmd = new SqlCommand(
             $"ALTER EVENT SESSION [{fullSessionName}] ON SERVER STATE = STOP",
             conn);
-        await cmd.ExecuteNonQueryAsync();
+        cmd.CommandTimeout = 30;
+        await cmd.ExecuteNonQueryAsync(ct);
 
         return new Dictionary<string, object>
         {
@@ -187,28 +192,31 @@ public partial class ProfilerService : IProfilerService
         };
     }
 
-    public async Task<Dictionary<string, object>> DropSessionAsync(string connectionString, string sessionName)
+    public async Task<Dictionary<string, object>> DropSessionAsync(string connectionString, string sessionName, CancellationToken ct = default)
     {
         var fullSessionName = $"{SessionPrefix}{sessionName}";
 
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
         // Stop first if running
         var stopSql = $"""
             IF EXISTS (
-                SELECT 1 FROM sys.dm_xe_sessions WHERE name = '{fullSessionName}'
+                SELECT 1 FROM sys.dm_xe_sessions WHERE name = @name
             )
             ALTER EVENT SESSION [{fullSessionName}] ON SERVER STATE = STOP
             """;
 
         await using var stopCmd = new SqlCommand(stopSql, conn);
-        await stopCmd.ExecuteNonQueryAsync();
+        stopCmd.Parameters.AddWithValue("@name", fullSessionName);
+        stopCmd.CommandTimeout = 30;
+        await stopCmd.ExecuteNonQueryAsync(ct);
 
         await using var dropCmd = new SqlCommand(
             $"DROP EVENT SESSION [{fullSessionName}] ON SERVER",
             conn);
-        await dropCmd.ExecuteNonQueryAsync();
+        dropCmd.CommandTimeout = 30;
+        await dropCmd.ExecuteNonQueryAsync(ct);
 
         return new Dictionary<string, object>
         {
@@ -218,26 +226,28 @@ public partial class ProfilerService : IProfilerService
         };
     }
 
-    public async Task<List<SessionInfo>> ListSessionsAsync(string connectionString)
+    public async Task<List<SessionInfo>> ListSessionsAsync(string connectionString, CancellationToken ct = default)
     {
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
-        var query = $"""
+        var query = """
             SELECT
                 s.name as session_name,
                 CASE WHEN ds.name IS NOT NULL THEN 'RUNNING' ELSE 'STOPPED' END as state
             FROM sys.server_event_sessions s
             LEFT JOIN sys.dm_xe_sessions ds ON s.name = ds.name
-            WHERE s.name LIKE '{SessionPrefix}%'
+            WHERE s.name LIKE @prefix
             ORDER BY s.name
             """;
 
         await using var cmd = new SqlCommand(query, conn);
-        await using var reader = await cmd.ExecuteReaderAsync();
+        cmd.Parameters.AddWithValue("@prefix", $"{SessionPrefix}%");
+        cmd.CommandTimeout = 30;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
 
         var sessions = new List<SessionInfo>();
-        while (await reader.ReadAsync())
+        while (await reader.ReadAsync(ct))
         {
             var sessionName = reader.GetString(0);
 
@@ -259,42 +269,44 @@ public partial class ProfilerService : IProfilerService
         string connectionString,
         string sessionName,
         EventFilters filters,
-        List<string>? excludePatterns = null)
+        List<string>? excludePatterns = null,
+        CancellationToken ct = default)
     {
         var fullSessionName = $"{SessionPrefix}{sessionName}";
 
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
         // Fetch raw ring buffer XML as a string — much faster than SQL Server-side XML shredding
-        var query = $"""
+        var query = """
             SELECT CAST(target_data AS NVARCHAR(MAX))
             FROM sys.dm_xe_session_targets st
             INNER JOIN sys.dm_xe_sessions s ON s.address = st.event_session_address
-            WHERE s.name = '{fullSessionName}'
+            WHERE s.name = @name
             AND st.target_name = 'ring_buffer'
             """;
 
         await using var cmd = new SqlCommand(query, conn);
+        cmd.Parameters.AddWithValue("@name", fullSessionName);
         cmd.CommandTimeout = 60;
 
-        var rawXml = (string?)await cmd.ExecuteScalarAsync();
+        var rawXml = (string?)await cmd.ExecuteScalarAsync(ct);
         if (string.IsNullOrEmpty(rawXml))
             return [];
 
-        // Parse XML client-side using XDocument (orders of magnitude faster than SQL XQuery)
-        var doc = XDocument.Parse(rawXml);
-        var eventNodes = doc.Descendants("event")
-            .Where(e =>
-            {
-                var name = e.Attribute("name")?.Value;
-                return name != "xml_deadlock_report" && name != "blocked_process_report";
-            });
-
+        // Stream-parse XML one <event> at a time to avoid holding the full XDocument tree in memory
         var events = new List<ProfilerEvent>();
-        foreach (var node in eventNodes)
+        using var stringReader = new StringReader(rawXml);
+        using var xmlReader = XmlReader.Create(stringReader);
+
+        while (xmlReader.ReadToFollowing("event"))
         {
+            var node = XElement.Load(xmlReader.ReadSubtree());
+
             var eventName = node.Attribute("name")?.Value ?? "";
+            if (eventName is "xml_deadlock_report" or "blocked_process_report")
+                continue;
+
             var batchText = GetDataValue(node, "batch_text");
             var statement = GetDataValue(node, "statement");
             var objectName = GetDataValue(node, "object_name");
@@ -395,19 +407,19 @@ public partial class ProfilerService : IProfilerService
     private static long? ParseNullableLong(string? value) => long.TryParse(value, out var v) ? v : null;
     private static int? ParseNullableInt(string? value) => int.TryParse(value, out var v) ? v : null;
 
-    public async Task<List<DeadlockEvent>> GetDeadlocksAsync(string connectionString, string sessionName)
+    public async Task<List<DeadlockEvent>> GetDeadlocksAsync(string connectionString, string sessionName, CancellationToken ct = default)
     {
         var fullSessionName = $"{SessionPrefix}{sessionName}";
 
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
-        var query = $"""
+        var query = """
             ;WITH EventData AS (
                 SELECT CAST(target_data AS XML) as event_xml
                 FROM sys.dm_xe_session_targets st
                 INNER JOIN sys.dm_xe_sessions s ON s.address = st.event_session_address
-                WHERE s.name = '{fullSessionName}'
+                WHERE s.name = @name
                 AND st.target_name = 'ring_buffer'
             )
             SELECT
@@ -419,12 +431,13 @@ public partial class ProfilerService : IProfilerService
             """;
 
         await using var cmd = new SqlCommand(query, conn);
+        cmd.Parameters.AddWithValue("@name", fullSessionName);
         cmd.CommandTimeout = 120;
 
-        await using var reader = await cmd.ExecuteReaderAsync();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
         var deadlocks = new List<DeadlockEvent>();
 
-        while (await reader.ReadAsync())
+        while (await reader.ReadAsync(ct))
         {
             var timestamp = reader.IsDBNull(0) ? (DateTime?)null : reader.GetDateTime(0);
             var xmlString = reader.IsDBNull(1) ? null : reader.GetString(1);
@@ -452,19 +465,19 @@ public partial class ProfilerService : IProfilerService
         return deadlocks;
     }
 
-    public async Task<List<BlockingEvent>> GetBlockingEventsAsync(string connectionString, string sessionName)
+    public async Task<List<BlockingEvent>> GetBlockingEventsAsync(string connectionString, string sessionName, CancellationToken ct = default)
     {
         var fullSessionName = $"{SessionPrefix}{sessionName}";
 
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
-        var query = $"""
+        var query = """
             ;WITH EventData AS (
                 SELECT CAST(target_data AS XML) as event_xml
                 FROM sys.dm_xe_session_targets st
                 INNER JOIN sys.dm_xe_sessions s ON s.address = st.event_session_address
-                WHERE s.name = '{fullSessionName}'
+                WHERE s.name = @name
                 AND st.target_name = 'ring_buffer'
             )
             SELECT
@@ -476,12 +489,13 @@ public partial class ProfilerService : IProfilerService
             """;
 
         await using var cmd = new SqlCommand(query, conn);
+        cmd.Parameters.AddWithValue("@name", fullSessionName);
         cmd.CommandTimeout = 120;
 
-        await using var reader = await cmd.ExecuteReaderAsync();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
         var blockingEvents = new List<BlockingEvent>();
 
-        while (await reader.ReadAsync())
+        while (await reader.ReadAsync(ct))
         {
             var timestamp = reader.IsDBNull(0) ? (DateTime?)null : reader.GetDateTime(0);
             var xmlString = reader.IsDBNull(1) ? null : reader.GetString(1);
@@ -507,10 +521,10 @@ public partial class ProfilerService : IProfilerService
         return blockingEvents;
     }
 
-    public async Task<Dictionary<string, object>> GetConnectionInfoAsync(string connectionString, string infoType)
+    public async Task<Dictionary<string, object>> GetConnectionInfoAsync(string connectionString, string infoType, CancellationToken ct = default)
     {
         await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
 
         var result = new Dictionary<string, object>();
 
@@ -523,9 +537,10 @@ public partial class ProfilerService : IProfilerService
                 WHERE database_id > 4
                 ORDER BY name
                 """, conn);
+            cmd.CommandTimeout = 30;
 
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
             {
                 databases.Add(new ConnectionInfoItem
                 {
@@ -550,9 +565,10 @@ public partial class ProfilerService : IProfilerService
                 GROUP BY program_name
                 ORDER BY connection_count DESC
                 """, conn);
+            cmd.CommandTimeout = 30;
 
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
             {
                 apps.Add(new ConnectionInfoItem
                 {
@@ -573,9 +589,10 @@ public partial class ProfilerService : IProfilerService
                 GROUP BY login_name
                 ORDER BY session_count DESC
                 """, conn);
+            cmd.CommandTimeout = 30;
 
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
             {
                 logins.Add(new ConnectionInfoItem
                 {
@@ -606,9 +623,10 @@ public partial class ProfilerService : IProfilerService
                 WHERE s.is_user_process = 1
                 ORDER BY s.last_request_start_time DESC
                 """, conn);
+            cmd.CommandTimeout = 30;
 
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
             {
                 sessions.Add(new ActiveSession
                 {
@@ -650,9 +668,10 @@ public partial class ProfilerService : IProfilerService
                 OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
                 WHERE r.blocking_session_id > 0
                 """, conn);
+            cmd.CommandTimeout = 30;
 
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
             {
                 blocking.Add(new ActiveBlockingInfo
                 {
@@ -820,25 +839,25 @@ public partial class ProfilerService : IProfilerService
 
         if (config.Databases.Count > 0)
         {
-            var dbFilter = string.Join(" OR ", config.Databases.Select(db => $"[database_name]=N'{db}'"));
+            var dbFilter = string.Join(" OR ", config.Databases.Select(db => $"[database_name]=N'{SanitizeXeValue(db)}'"));
             predicates.Add($"({dbFilter})");
         }
 
         if (config.Applications.Count > 0)
         {
-            var appFilter = string.Join(" OR ", config.Applications.Select(app => $"[client_app_name] LIKE N'%{app}%'"));
+            var appFilter = string.Join(" OR ", config.Applications.Select(app => $"[client_app_name] LIKE N'%{SanitizeXeValue(app)}%'"));
             predicates.Add($"({appFilter})");
         }
 
         if (config.Logins.Count > 0)
         {
-            var loginFilter = string.Join(" OR ", config.Logins.Select(login => $"[server_principal_name]=N'{login}'"));
+            var loginFilter = string.Join(" OR ", config.Logins.Select(login => $"[server_principal_name]=N'{SanitizeXeValue(login)}'"));
             predicates.Add($"({loginFilter})");
         }
 
         if (config.Hosts.Count > 0)
         {
-            var hostFilter = string.Join(" OR ", config.Hosts.Select(host => $"[client_hostname]=N'{host}'"));
+            var hostFilter = string.Join(" OR ", config.Hosts.Select(host => $"[client_hostname]=N'{SanitizeXeValue(host)}'"));
             predicates.Add($"({hostFilter})");
         }
 
@@ -851,6 +870,18 @@ public partial class ProfilerService : IProfilerService
         predicates.Add("[sqlserver].[is_system]=(0)");
 
         return predicates.Count > 0 ? "WHERE " + string.Join(" AND ", predicates) : "";
+    }
+
+    /// <summary>
+    /// Sanitizes a value for use in XE predicate clauses (which don't support @parameters).
+    /// Escapes single quotes and strips characters that aren't safe for SQL string literals.
+    /// </summary>
+    private static string SanitizeXeValue(string value)
+    {
+        // Escape single quotes by doubling them
+        var escaped = value.Replace("'", "''");
+        // Strip characters outside the safe set for identifiers/values
+        return Regex.Replace(escaped, @"[^a-zA-Z0-9_.\-@ ]", "");
     }
 
     private static bool MatchesPatterns(string text, List<string> patterns)

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace SqlServer.Profiler.Mcp.Api.Models;
 
 /// <summary>
@@ -6,8 +8,10 @@ namespace SqlServer.Profiler.Mcp.Api.Models;
 public class CreateSessionRequest
 {
     /// <summary>
-    /// Unique name for this session (alphanumeric + underscore, e.g. 'debug_checkout').
+    /// Unique name for this session (alphanumeric + underscore/hyphen, e.g. 'debug_checkout').
     /// </summary>
+    [Required]
+    [RegularExpression(@"^[a-zA-Z0-9_\-]+$", ErrorMessage = "SessionName must contain only letters, digits, underscores, or hyphens.")]
     public required string SessionName { get; set; }
 
     /// <summary>
@@ -38,6 +42,7 @@ public class CreateSessionRequest
     /// <summary>
     /// Minimum query duration in milliseconds. Use to filter out fast queries. Default 0 = all.
     /// </summary>
+    [Range(0, int.MaxValue)]
     public int MinDurationMs { get; set; } = 0;
 
     /// <summary>
@@ -51,8 +56,9 @@ public class CreateSessionRequest
     public string? ExcludePatterns { get; set; }
 
     /// <summary>
-    /// Ring buffer size in MB. Larger = more events but more memory. Default 50.
+    /// Ring buffer size in MB. Larger = more events but more memory. Default 50, max 500.
     /// </summary>
+    [Range(1, 500)]
     public int RingBufferMb { get; set; } = 50;
 
     /// <summary>
@@ -70,6 +76,8 @@ public class QuickCaptureRequest
     /// <summary>
     /// Unique name for this session.
     /// </summary>
+    [Required]
+    [RegularExpression(@"^[a-zA-Z0-9_\-]+$", ErrorMessage = "SessionName must contain only letters, digits, underscores, or hyphens.")]
     public required string SessionName { get; set; }
 
     /// <summary>
@@ -95,6 +103,7 @@ public class QuickCaptureRequest
     /// <summary>
     /// Minimum query duration in milliseconds.
     /// </summary>
+    [Range(0, int.MaxValue)]
     public int MinDurationMs { get; set; } = 0;
 
     /// <summary>
@@ -103,8 +112,9 @@ public class QuickCaptureRequest
     public bool ExcludeNoise { get; set; } = true;
 
     /// <summary>
-    /// Ring buffer size in MB. Default 50.
+    /// Ring buffer size in MB. Default 50, max 500.
     /// </summary>
+    [Range(1, 500)]
     public int RingBufferMb { get; set; } = 50;
 
     /// <summary>
@@ -126,5 +136,6 @@ public class GrantPermissionsRequest
     /// <summary>
     /// The SQL Server login to grant permissions to (e.g., 'app_user' or 'DOMAIN\Username').
     /// </summary>
+    [Required]
     public required string TargetLogin { get; set; }
 }
