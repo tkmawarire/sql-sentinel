@@ -270,56 +270,39 @@ public partial class ProfilerService : IProfilerService
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync();
 
+        // Fetch raw ring buffer XML as a string — much faster than SQL Server-side XML shredding
         var query = $"""
-            ;WITH EventData AS (
-                SELECT
-                    CAST(target_data AS XML) as event_xml
-                FROM sys.dm_xe_session_targets st
-                INNER JOIN sys.dm_xe_sessions s ON s.address = st.event_session_address
-                WHERE s.name = '{fullSessionName}'
-                AND st.target_name = 'ring_buffer'
-            )
-            SELECT
-                event_node.value('(@name)[1]', 'varchar(100)') as event_name,
-                event_node.value('(@timestamp)[1]', 'datetime2') as event_timestamp,
-                event_node.value('(data[@name="duration"]/value)[1]', 'bigint') as duration_us,
-                event_node.value('(data[@name="cpu_time"]/value)[1]', 'bigint') as cpu_time_us,
-                event_node.value('(data[@name="logical_reads"]/value)[1]', 'bigint') as logical_reads,
-                event_node.value('(data[@name="physical_reads"]/value)[1]', 'bigint') as physical_reads,
-                event_node.value('(data[@name="writes"]/value)[1]', 'bigint') as writes,
-                event_node.value('(data[@name="row_count"]/value)[1]', 'bigint') as row_count,
-                event_node.value('(data[@name="batch_text"]/value)[1]', 'nvarchar(max)') as batch_text,
-                event_node.value('(data[@name="statement"]/value)[1]', 'nvarchar(max)') as statement,
-                event_node.value('(action[@name="database_name"]/value)[1]', 'nvarchar(256)') as database_name,
-                event_node.value('(action[@name="client_app_name"]/value)[1]', 'nvarchar(256)') as client_app_name,
-                event_node.value('(action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') as client_hostname,
-                event_node.value('(action[@name="server_principal_name"]/value)[1]', 'nvarchar(256)') as login_name,
-                event_node.value('(action[@name="session_id"]/value)[1]', 'int') as session_id,
-                event_node.value('(action[@name="transaction_id"]/value)[1]', 'bigint') as transaction_id,
-                event_node.value('(action[@name="request_id"]/value)[1]', 'int') as request_id,
-                event_node.value('(data[@name="result"]/text)[1]', 'varchar(50)') as result,
-                event_node.value('(data[@name="error_number"]/value)[1]', 'int') as error_number,
-                event_node.value('(data[@name="message"]/value)[1]', 'nvarchar(max)') as error_message,
-                event_node.value('(data[@name="object_name"]/value)[1]', 'nvarchar(256)') as object_name,
-                event_node.value('(action[@name="sql_text"]/value)[1]', 'nvarchar(max)') as action_sql_text
-            FROM EventData
-            CROSS APPLY event_xml.nodes('//RingBufferTarget/event[not(@name="xml_deadlock_report" or @name="blocked_process_report")]') AS events(event_node)
-            ORDER BY event_timestamp
+            SELECT CAST(target_data AS NVARCHAR(MAX))
+            FROM sys.dm_xe_session_targets st
+            INNER JOIN sys.dm_xe_sessions s ON s.address = st.event_session_address
+            WHERE s.name = '{fullSessionName}'
+            AND st.target_name = 'ring_buffer'
             """;
 
         await using var cmd = new SqlCommand(query, conn);
-        cmd.CommandTimeout = 120; // XML parsing can be slow
+        cmd.CommandTimeout = 60;
 
-        await using var reader = await cmd.ExecuteReaderAsync();
+        var rawXml = (string?)await cmd.ExecuteScalarAsync();
+        if (string.IsNullOrEmpty(rawXml))
+            return [];
+
+        // Parse XML client-side using XDocument (orders of magnitude faster than SQL XQuery)
+        var doc = XDocument.Parse(rawXml);
+        var eventNodes = doc.Descendants("event")
+            .Where(e =>
+            {
+                var name = e.Attribute("name")?.Value;
+                return name != "xml_deadlock_report" && name != "blocked_process_report";
+            });
 
         var events = new List<ProfilerEvent>();
-        while (await reader.ReadAsync())
+        foreach (var node in eventNodes)
         {
-            var eventName = reader.IsDBNull(0) ? "" : reader.GetString(0);
-            var batchText = reader.IsDBNull(8) ? null : reader.GetString(8);
-            var statement = reader.IsDBNull(9) ? null : reader.GetString(9);
-            var objectName = reader.IsDBNull(20) ? null : reader.GetString(20);
-            var actionSqlText = reader.IsDBNull(21) ? null : reader.GetString(21);
+            var eventName = node.Attribute("name")?.Value ?? "";
+            var batchText = GetDataValue(node, "batch_text");
+            var statement = GetDataValue(node, "statement");
+            var objectName = GetDataValue(node, "object_name");
+            var actionSqlText = GetActionValue(node, "sql_text");
 
             // For schema change events, use object name if no sql text
             var sqlText = batchText ?? statement ?? actionSqlText ?? "";
@@ -328,11 +311,12 @@ public partial class ProfilerService : IProfilerService
                 sqlText = $"{eventName}: {objectName}";
             }
 
-            var eventTimestamp = reader.IsDBNull(1) ? (DateTime?)null : reader.GetDateTime(1);
-            var databaseName = reader.IsDBNull(10) ? "" : reader.GetString(10);
-            var clientAppName = reader.IsDBNull(11) ? "" : reader.GetString(11);
-            var loginName = reader.IsDBNull(13) ? "" : reader.GetString(13);
-            var durationUs = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
+            var timestampStr = node.Attribute("timestamp")?.Value;
+            var eventTimestamp = string.IsNullOrEmpty(timestampStr) ? (DateTime?)null : DateTime.Parse(timestampStr, null, System.Globalization.DateTimeStyles.RoundtripKind);
+            var databaseName = GetActionValue(node, "database_name") ?? "";
+            var clientAppName = GetActionValue(node, "client_app_name") ?? "";
+            var loginName = GetActionValue(node, "server_principal_name") ?? "";
+            var durationUs = ParseLong(GetDataValue(node, "duration"));
 
             // Apply filters
             if (!string.IsNullOrEmpty(filters.Database) && databaseName != filters.Database)
@@ -361,22 +345,22 @@ public partial class ProfilerService : IProfilerService
                 EventName = eventName,
                 EventTimestamp = eventTimestamp,
                 DurationUs = durationUs,
-                CpuTimeUs = reader.IsDBNull(3) ? 0L : reader.GetInt64(3),
-                LogicalReads = reader.IsDBNull(4) ? 0L : reader.GetInt64(4),
-                PhysicalReads = reader.IsDBNull(5) ? 0L : reader.GetInt64(5),
-                Writes = reader.IsDBNull(6) ? 0L : reader.GetInt64(6),
-                RowCount = reader.IsDBNull(7) ? 0L : reader.GetInt64(7),
+                CpuTimeUs = ParseLong(GetDataValue(node, "cpu_time")),
+                LogicalReads = ParseLong(GetDataValue(node, "logical_reads")),
+                PhysicalReads = ParseLong(GetDataValue(node, "physical_reads")),
+                Writes = ParseLong(GetDataValue(node, "writes")),
+                RowCount = ParseLong(GetDataValue(node, "row_count")),
                 SqlText = sqlText,
                 DatabaseName = databaseName,
                 ClientAppName = clientAppName,
-                ClientHostname = reader.IsDBNull(12) ? "" : reader.GetString(12),
+                ClientHostname = GetActionValue(node, "client_hostname") ?? "",
                 LoginName = loginName,
-                SessionId = reader.IsDBNull(14) ? 0 : reader.GetInt32(14),
-                TransactionId = reader.IsDBNull(15) ? null : reader.GetInt64(15),
-                RequestId = reader.IsDBNull(16) ? null : reader.GetInt32(16),
-                Result = reader.IsDBNull(17) ? null : reader.GetString(17),
-                ErrorNumber = reader.IsDBNull(18) ? null : reader.GetInt32(18),
-                ErrorMessage = reader.IsDBNull(19) ? null : reader.GetString(19),
+                SessionId = ParseInt(GetActionValue(node, "session_id")),
+                TransactionId = ParseNullableLong(GetActionValue(node, "transaction_id")),
+                RequestId = ParseNullableInt(GetActionValue(node, "request_id")),
+                Result = GetDataText(node, "result"),
+                ErrorNumber = ParseNullableInt(GetDataValue(node, "error_number")),
+                ErrorMessage = GetDataValue(node, "message"),
                 QueryFingerprint = _fingerprintService.GenerateFingerprint(sqlText),
                 DurationFormatted = FormatDuration(durationUs)
             };
@@ -386,6 +370,34 @@ public partial class ProfilerService : IProfilerService
 
         return events;
     }
+
+    // ── XML helper methods for client-side ring buffer parsing ──
+
+    private static string? GetDataValue(XElement eventNode, string dataName)
+    {
+        return eventNode.Elements("data")
+            .FirstOrDefault(d => d.Attribute("name")?.Value == dataName)
+            ?.Element("value")?.Value;
+    }
+
+    private static string? GetDataText(XElement eventNode, string dataName)
+    {
+        return eventNode.Elements("data")
+            .FirstOrDefault(d => d.Attribute("name")?.Value == dataName)
+            ?.Element("text")?.Value;
+    }
+
+    private static string? GetActionValue(XElement eventNode, string actionName)
+    {
+        return eventNode.Elements("action")
+            .FirstOrDefault(a => a.Attribute("name")?.Value == actionName)
+            ?.Element("value")?.Value;
+    }
+
+    private static long ParseLong(string? value) => long.TryParse(value, out var v) ? v : 0L;
+    private static int ParseInt(string? value) => int.TryParse(value, out var v) ? v : 0;
+    private static long? ParseNullableLong(string? value) => long.TryParse(value, out var v) ? v : null;
+    private static int? ParseNullableInt(string? value) => int.TryParse(value, out var v) ? v : null;
 
     public async Task<List<DeadlockEvent>> GetDeadlocksAsync(string connectionString, string sessionName)
     {
