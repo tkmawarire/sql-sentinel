@@ -1,0 +1,33 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.tkmawarire/sql-sentinel",
+  "version": "2.0.0",
+  "description": "SQL Server monitoring and diagnostics for AI agents using Extended Events. No ODBC drivers required.",
+  "title": "SQL Sentinel MCP Server",
+  "websiteUrl": "https://github.com/tkmawarire/sql-sentinel",
+  "packages": [
+    {
+      "registryType": "nuget",
+      "identifier": "Neofenyx.SqlSentinel.Mcp",
+      "version": "2.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [],
+      "environmentVariables": []
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/tkmawarire/sql-sentinel-mcp",
+      "version": "2.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": []
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/tkmawarire/sql-sentinel",
+    "source": "github"
+  }
+}

@@ -1,0 +1,123 @@
+name: Publish to MCP Registry
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (must match NuGet package version, e.g. 2.0.0)'
+        required: true
+
+jobs:
+  publish-nuget:
+    name: Pack and Push NuGet Package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Get version
+        id: get-version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          GIT_REF: ${{ github.ref }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "version=$INPUT_VERSION" >> $GITHUB_OUTPUT
+          else
+            VERSION="${GIT_REF#refs/tags/v}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Restore and pack NuGet package
+        env:
+          PKG_VERSION: ${{ steps.get-version.outputs.version }}
+        run: |
+          dotnet restore SqlServer.Profiler.Mcp/SqlServer.Profiler.Mcp.csproj
+          dotnet pack SqlServer.Profiler.Mcp/SqlServer.Profiler.Mcp.csproj \
+            -c Release \
+            --no-restore \
+            -p:Version="$PKG_VERSION" \
+            -o ./nupkg
+
+      - name: Push to NuGet.org
+        env:
+          NUGET_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push ./nupkg/*.nupkg \
+            --api-key "$NUGET_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Wait for NuGet package availability
+        env:
+          PKG_VERSION: ${{ steps.get-version.outputs.version }}
+        run: |
+          PKG_ID="neofenyx.sqlsentinel.mcp"
+          URL="https://api.nuget.org/v3-flatcontainer/${PKG_ID}/${PKG_VERSION}/readme"
+          ELAPSED=0
+          INTERVAL=15
+          TIMEOUT=300
+          echo "Waiting for NuGet package README at ${URL}..."
+          until curl -sf "$URL" > /dev/null 2>&1; do
+            if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+              echo "ERROR: Package README not available after ${TIMEOUT}s"
+              exit 1
+            fi
+            echo "Not yet available. Elapsed: ${ELAPSED}s"
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          echo "Package README is available."
+
+  publish-mcp-registry:
+    name: Publish to Official MCP Registry
+    runs-on: ubuntu-latest
+    needs: [publish-nuget]
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update server.json version
+        env:
+          PKG_VERSION: ${{ needs.publish-nuget.outputs.version }}
+        run: |
+          python3 -c "
+          import json, os
+          version = os.environ['PKG_VERSION']
+          with open('.mcp/server.json', 'r') as f:
+              data = json.load(f)
+          data['version'] = version
+          for pkg in data.get('packages', []):
+              pkg['version'] = version
+          with open('.mcp/server.json', 'w') as f:
+              json.dump(data, f, indent=2)
+          "
+
+      - name: Download mcp-publisher
+        run: |
+          curl -fsSL \
+            "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
+            -o mcp-publisher.tar.gz
+          tar xf mcp-publisher.tar.gz
+          chmod +x mcp-publisher
+
+      - name: Publish to MCP Registry (GitHub OIDC)
+        run: |
+          ./mcp-publisher publish .mcp/server.json

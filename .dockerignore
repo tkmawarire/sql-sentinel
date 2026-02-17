@@ -1,0 +1,43 @@
+# Build output
+**/bin/
+**/obj/
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Packages
+*.nupkg
+
+# Documentation (not needed for build)
+docs/
+*.md
+!README.md
+
+# MCP manifest
+.mcp/
+
+# CI/CD
+.github/
+
+# Secrets - API project appsettings may contain real credentials
+SqlServer.Profiler.Mcp.Api/appsettings*.json
+
+# Projects not needed for the MCP server image
+SqlServer.Profiler.Mcp.Api/
+SqlServer.Profiler.Mcp.Cli/

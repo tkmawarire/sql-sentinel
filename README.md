@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.tkmawarire/sql-sentinel -->
 # SQL Server Profiler MCP Server (.NET)
 
 A production-ready MCP (Model Context Protocol) server for SQL Server query profiling using Extended Events. Built with .NET 9 (compatible with .NET 10) and Microsoft.Data.SqlClient for **native SQL Server connectivity—NO ODBC DRIVERS REQUIRED**.
@@ -40,64 +41,85 @@ A production-ready MCP (Model Context Protocol) server for SQL Server query prof
 
 ## Installation
 
-### Build from Source
+### Option 1: Docker (Recommended)
+
+No .NET SDK required. Works on any system with Docker installed.
 
 ```bash
-cd sqlserver-profiler-mcp-dotnet
-dotnet restore
+docker pull ghcr.io/tkmawarire/sql-sentinel-mcp:latest
+```
+
+#### Claude Desktop (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "sql-sentinel": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--network", "host",
+               "ghcr.io/tkmawarire/sql-sentinel-mcp:latest"]
+    }
+  }
+}
+```
+
+#### Claude Code
+
+```bash
+claude mcp add sql-sentinel -- docker run -i --rm --network host ghcr.io/tkmawarire/sql-sentinel-mcp:latest
+```
+
+> **Network access**: The `-i` flag is required for stdio transport. Use `--network host` so the container can reach SQL Server on your host machine. For remote SQL Server, omit `--network host` and use the accessible hostname in your connection string.
+
+### Option 2: .NET Global Tool (NuGet)
+
+Requires .NET 9 SDK or later.
+
+```bash
+dotnet tool install -g Neofenyx.SqlSentinel.Mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "sql-sentinel": {
+      "command": "sql-sentinel-mcp"
+    }
+  }
+}
+```
+
+### Option 3: Build from Source
+
+```bash
+git clone https://github.com/tkmawarire/sql-sentinel.git
+cd sql-sentinel
 dotnet build
 ```
 
-### Publish Single Executable
+Run directly:
+
+```bash
+dotnet run --project SqlServer.Profiler.Mcp/
+```
+
+Or publish a self-contained single binary:
 
 ```bash
 # Windows
-dotnet publish -c Release -r win-x64 --self-contained
+dotnet publish SqlServer.Profiler.Mcp/ -c Release -r win-x64 --self-contained
 
 # Linux
-dotnet publish -c Release -r linux-x64 --self-contained
-
-# macOS (Intel)
-dotnet publish -c Release -r osx-x64 --self-contained
+dotnet publish SqlServer.Profiler.Mcp/ -c Release -r linux-x64 --self-contained
 
 # macOS (Apple Silicon)
-dotnet publish -c Release -r osx-arm64 --self-contained
+dotnet publish SqlServer.Profiler.Mcp/ -c Release -r osx-arm64 --self-contained
+
+# macOS (Intel)
+dotnet publish SqlServer.Profiler.Mcp/ -c Release -r osx-x64 --self-contained
 ```
 
 Output will be in `bin/Release/net9.0/{runtime}/publish/`
-
-## MCP Client Configuration
-
-### Claude Desktop (`claude_desktop_config.json`)
-
-```json
-{
-  "mcpServers": {
-    "sqlserver-profiler": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/path/to/sqlserver-profiler-mcp-dotnet"]
-    }
-  }
-}
-```
-
-Or with published executable:
-
-```json
-{
-  "mcpServers": {
-    "sqlserver-profiler": {
-      "command": "/path/to/sqlserver-profiler-mcp"
-    }
-  }
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add sqlserver-profiler dotnet run --project /path/to/sqlserver-profiler-mcp-dotnet
-```
 
 ## Connection Strings
 
