@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="SqlServer.Profiler.Mcp.Api/SqlServer.Profiler.Mcp.Api.csproj" />
+  <Project Path="SqlServer.Profiler.Mcp.Cli/SqlServer.Profiler.Mcp.Cli.csproj" />
+  <Project Path="SqlServer.Profiler.Mcp/SqlServer.Profiler.Mcp.csproj" />
+</Solution>

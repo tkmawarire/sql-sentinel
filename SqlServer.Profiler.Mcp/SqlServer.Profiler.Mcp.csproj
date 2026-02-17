@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>sqlserver-profiler-mcp</AssemblyName>
+    <Version>1.0.0</Version>
+    <Description>SQL Server Profiler MCP Server - Extended Events based profiling for AI agents</Description>
+    
+    <!-- .NET 10 ready - just change TargetFramework to net10.0 when available -->
+    <LangVersion>latest</LangVersion>
+    
+    <!-- Single file publish for easy distribution -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Native SQL Server connectivity - NO ODBC DRIVERS REQUIRED -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    
+    <!-- JSON handling -->
+    <PackageReference Include="System.Text.Json" Version="9.0.4" />
+    
+    <!-- Hosting for dependency injection and app lifecycle -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
+
+    <!-- MCP SDK for .NET (if available) or we implement protocol directly -->
+    <!-- Using ModelContextProtocol package -->
+    <PackageReference Include="ModelContextProtocol" Version="0.1.0-preview.11" />
+  </ItemGroup>
+
+</Project>

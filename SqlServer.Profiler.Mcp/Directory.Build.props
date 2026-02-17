@@ -1,0 +1,6 @@
+<Project>
+  <!-- Prevent the root project from picking up source files in subproject directories -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);SqlServer.Profiler.Mcp.Api/**;SqlServer.Profiler.Mcp.Cli/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

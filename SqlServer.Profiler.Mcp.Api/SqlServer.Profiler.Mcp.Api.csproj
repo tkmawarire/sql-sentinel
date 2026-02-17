@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>1591</NoWarn>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../SqlServer.Profiler.Mcp.csproj" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+    <ProjectReference Include="..\SqlServer.Profiler.Mcp\SqlServer.Profiler.Mcp.csproj" />
+  </ItemGroup>
+
+</Project>
