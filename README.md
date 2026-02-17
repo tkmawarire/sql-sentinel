@@ -5,7 +5,7 @@
 [![Docker](https://img.shields.io/badge/ghcr.io-sql--sentinel--mcp-blue)](https://ghcr.io/tkmawarire/sql-sentinel-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A production-ready MCP (Model Context Protocol) server for SQL Server monitoring and diagnostics using Extended Events. Built with .NET 9 and Microsoft.Data.SqlClient for **native SQL Server connectivity — no ODBC drivers required**.
+A production-ready MCP (Model Context Protocol) server for SQL Server monitoring, diagnostics, and database operations. Built with .NET 9 and Microsoft.Data.SqlClient for **native SQL Server connectivity — no ODBC drivers required**.
 
 ## Features
 
@@ -19,6 +19,7 @@ A production-ready MCP (Model Context Protocol) server for SQL Server monitoring
 - **Health Check** — Comprehensive server diagnostic: slow queries, deadlocks, blocking, wait stats, and insights
 - **Real-Time Streaming** — Stream captured events for a specified duration
 - **Production-Safe** — Auto-excludes noise (`sp_reset_connection`, `SET` statements, trace queries)
+- **Database Operations** — List tables, describe schemas, query data, insert, update, and drop tables
 - **AI-Optimized** — Structured JSON output with optional Markdown formatting
 
 ## Requirements
@@ -175,6 +176,18 @@ Server=yourserver.database.windows.net;Database=yourdb;User Id=user;Password=pas
 | `sqlsentinel_check_permissions` | Check current login permissions and blocked process threshold config |
 | `sqlsentinel_grant_permissions` | Grant required permissions to a login (requires sysadmin) |
 
+### Database Operations
+
+| Tool | Description |
+|------|-------------|
+| `sqlsentinel_list_tables` | List all user tables in the database (schema-qualified) |
+| `sqlsentinel_describe_table` | Detailed table schema: columns, indexes, constraints, foreign keys |
+| `sqlsentinel_create_table` | Create a new table via CREATE TABLE statement |
+| `sqlsentinel_insert_data` | Insert data via INSERT statement |
+| `sqlsentinel_read_data` | Execute SELECT queries and return results |
+| `sqlsentinel_update_data` | Update data via UPDATE statement |
+| `sqlsentinel_drop_table` | Drop a table via DROP TABLE statement |
+
 ## Usage Examples
 
 ### Quick Debug Session
@@ -271,6 +284,24 @@ Agent: sqlsentinel_health_check(
 )
 ```
 
+### Database Operations
+
+```
+Agent: sqlsentinel_list_tables(
+    connectionString: "Server=localhost;Database=AdventureWorks;Integrated Security=true;TrustServerCertificate=true"
+)
+
+Agent: sqlsentinel_describe_table(
+    connectionString: "...",
+    name: "dbo.Products"
+)
+
+Agent: sqlsentinel_read_data(
+    connectionString: "...",
+    sql: "SELECT TOP 10 * FROM dbo.Products ORDER BY CreatedDate DESC"
+)
+```
+
 ### Wait Stats (No Session Required)
 
 ```
@@ -321,18 +352,22 @@ sql-profiler-mcp/
 │   ├── SqlServer.Profiler.Mcp.csproj
 │   ├── Program.cs                         # Entry point, DI setup, MCP config
 │   ├── Models/
-│   │   └── ProfilerModels.cs              # Records, enums, data models
+│   │   ├── ProfilerModels.cs              # Records, enums, data models
+│   │   └── DbOperationResult.cs           # Result model for CRUD operations
 │   ├── Services/
 │   │   ├── ProfilerService.cs             # Core Extended Events logic
 │   │   ├── QueryFingerprintService.cs     # SQL normalization & fingerprinting
 │   │   ├── WaitStatsService.cs            # DMV-based wait stats analysis
 │   │   ├── SessionConfigStore.cs          # In-memory session config storage
 │   │   └── EventStreamingService.cs       # Real-time event streaming
+│   ├── Utilities/
+│   │   └── SqlInputValidator.cs           # SQL input validation & escaping
 │   └── Tools/
 │       ├── SessionManagementTools.cs      # Session lifecycle tools (6)
 │       ├── EventRetrievalTools.cs         # Event retrieval tools (5)
 │       ├── DiagnosticTools.cs             # Diagnostic tools (4)
-│       └── PermissionTools.cs             # Permission tools (2)
+│       ├── PermissionTools.cs             # Permission tools (2)
+│       └── DatabaseTools.cs               # Database CRUD tools (7)
 ├── SqlServer.Profiler.Mcp.Api/            # Debug REST API (Swagger on port 5100)
 │   ├── SqlServer.Profiler.Mcp.Api.csproj
 │   ├── Program.cs

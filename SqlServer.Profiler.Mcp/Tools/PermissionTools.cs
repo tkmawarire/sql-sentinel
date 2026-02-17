@@ -1,8 +1,8 @@
 using System.ComponentModel;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using ModelContextProtocol.Server;
+using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
 
@@ -10,7 +10,7 @@ namespace SqlServer.Profiler.Mcp.Tools;
 /// MCP Tools for checking and managing SQL Server profiler permissions.
 /// </summary>
 [McpServerToolType]
-public partial class PermissionTools
+public class PermissionTools
 {
     private static readonly string[] RequiredPermissions =
     [
@@ -96,7 +96,7 @@ public partial class PermissionTools
             {
                 result["message"] = "Missing required permissions. See grantStatements for the SQL needed.";
                 result["grantStatements"] = missingPermissions
-                    .Select(p => $"GRANT {p} TO [{EscapeBrackets(currentLogin)}];")
+                    .Select(p => $"GRANT {p} TO [{SqlInputValidator.EscapeBrackets(currentLogin)}];")
                     .ToList();
                 result["suggestion"] = "Run the grant statements using a sysadmin connection, or use sqlsentinel_grant_permissions tool.";
             }
@@ -150,7 +150,7 @@ public partial class PermissionTools
         try
         {
             // Validate login name format (basic SQL injection prevention)
-            if (!IsValidLoginName(targetLogin))
+            if (!SqlInputValidator.IsValidLoginName(targetLogin))
             {
                 return JsonSerializer.Serialize(new
                 {
@@ -217,7 +217,7 @@ public partial class PermissionTools
             }
 
             // Grant permissions
-            var escapedLogin = EscapeBrackets(targetLogin);
+            var escapedLogin = SqlInputValidator.EscapeBrackets(targetLogin);
             var grantedPermissions = new List<string>();
             var failedPermissions = new List<(string permission, string error)>();
 
@@ -281,21 +281,4 @@ public partial class PermissionTools
         }
     }
 
-    private static bool IsValidLoginName(string loginName)
-    {
-        if (string.IsNullOrWhiteSpace(loginName) || loginName.Length > 128)
-            return false;
-
-        // Allow alphanumeric, underscore, hyphen, backslash (for domain), at sign (for email-like), and dot
-        return ValidLoginRegex().IsMatch(loginName);
-    }
-
-    private static string EscapeBrackets(string identifier)
-    {
-        // Escape ] as ]] for SQL Server bracket identifiers
-        return identifier.Replace("]", "]]");
-    }
-
-    [GeneratedRegex(@"^[\w\-\\@\.]+$")]
-    private static partial Regex ValidLoginRegex();
 }

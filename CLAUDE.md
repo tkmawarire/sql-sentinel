@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SQL Sentinel MCP Server (v2.0.0) - a .NET 9 MCP (Model Context Protocol) server for SQL Server monitoring using Extended Events. Provides query profiling, deadlock detection, blocking analysis, wait stats, and intelligent diagnostics. Uses Microsoft.Data.SqlClient for native SQL Server connectivity (no ODBC drivers required).
+SQL Sentinel MCP Server (v2.0.0) - a .NET 9 MCP (Model Context Protocol) server for SQL Server monitoring, diagnostics, and database operations using Extended Events and DMVs. Provides query profiling, deadlock detection, blocking analysis, wait stats, intelligent diagnostics, and CRUD database tools. Uses Microsoft.Data.SqlClient for native SQL Server connectivity (no ODBC drivers required).
 
 ## Build Commands
 
@@ -35,12 +35,16 @@ Program.cs                          # Entry point, DI setup, MCP server config
 │   ├── WaitStatsService.cs         # DMV-based wait stats analysis (IWaitStatsService)
 │   └── SessionConfigStore.cs       # In-memory session config storage
 ├── Models/
-│   └── ProfilerModels.cs           # Records, enums (SessionConfig, ProfilerEvent, DeadlockEvent, etc.)
+│   ├── ProfilerModels.cs           # Records, enums (SessionConfig, ProfilerEvent, DeadlockEvent, etc.)
+│   └── DbOperationResult.cs        # Result model for CRUD database operations
+├── Utilities/
+│   └── SqlInputValidator.cs        # SQL input validation & escaping (shared across tools)
 └── Tools/
     ├── SessionManagementTools.cs   # MCP tools: create/start/stop/drop/list/quick_capture
     ├── EventRetrievalTools.cs      # MCP tools: get_events/get_stats/analyze_sequence/get_connection_info
     ├── DiagnosticTools.cs          # MCP tools: get_deadlocks/get_blocking/get_wait_stats/health_check
-    └── PermissionTools.cs          # MCP tools: check_permissions/grant_permissions
+    ├── PermissionTools.cs          # MCP tools: check_permissions/grant_permissions
+    └── DatabaseTools.cs            # MCP tools: list_tables/describe_table/create_table/read_data/insert_data/update_data/drop_table
 ```
 
 **Key patterns:**
@@ -70,6 +74,8 @@ Program.cs                          # Entry point, DI setup, MCP server config
 **Diagnostics:** `sqlsentinel_get_deadlocks`, `sqlsentinel_get_blocking`, `sqlsentinel_get_wait_stats`, `sqlsentinel_health_check`
 
 **Permissions:** `sqlsentinel_check_permissions`, `sqlsentinel_grant_permissions`
+
+**Database operations:** `sqlsentinel_list_tables`, `sqlsentinel_describe_table`, `sqlsentinel_create_table`, `sqlsentinel_insert_data`, `sqlsentinel_read_data`, `sqlsentinel_update_data`, `sqlsentinel_drop_table`
 
 ## Supported Event Types
 
