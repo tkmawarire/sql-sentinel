@@ -16,15 +16,18 @@ public class DiagnosticTools
     private readonly IProfilerService _profilerService;
     private readonly IWaitStatsService _waitStatsService;
     private readonly SessionConfigStore _configStore;
+    private readonly IMemoryService _memoryService;
 
     public DiagnosticTools(
         IProfilerService profilerService,
         IWaitStatsService waitStatsService,
-        SessionConfigStore configStore)
+        SessionConfigStore configStore,
+        IMemoryService memoryService)
     {
         _profilerService = profilerService;
         _waitStatsService = waitStatsService;
         _configStore = configStore;
+        _memoryService = memoryService;
     }
 
     [McpServerTool(Name = "sqlsentinel_get_deadlocks")]
@@ -380,6 +383,25 @@ public class DiagnosticTools
                 ActiveBlocking = activeBlocking,
                 Insights = insights
             };
+
+            // Auto-save health check results to memory (snapshot insights to avoid race)
+            if (eventsTask != null)
+            {
+                var insightsSnapshot = insights.ToList();
+                var deadlocksSnapshot = deadlocks;
+                var blockingSnapshot = blockingEvents;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var events = await eventsTask;
+                        var serverName = MemoryService.ExtractServerName(connectionString);
+                        await _memoryService.SaveCaptureAsync(serverName, sessionName, events,
+                            deadlocks: deadlocksSnapshot, blockingEvents: blockingSnapshot, insights: insightsSnapshot);
+                    }
+                    catch { /* Memory failures never break primary operations */ }
+                });
+            }
 
             if (responseFormat.Equals("Markdown", StringComparison.OrdinalIgnoreCase))
             {

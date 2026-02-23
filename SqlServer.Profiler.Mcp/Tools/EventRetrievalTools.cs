@@ -17,17 +17,20 @@ public class EventRetrievalTools
     private readonly SessionConfigStore _configStore;
     private readonly IQueryFingerprintService _fingerprintService;
     private readonly IEventStreamingService _streamingService;
+    private readonly IMemoryService _memoryService;
 
     public EventRetrievalTools(
         IProfilerService profilerService,
         SessionConfigStore configStore,
         IQueryFingerprintService fingerprintService,
-        IEventStreamingService streamingService)
+        IEventStreamingService streamingService,
+        IMemoryService memoryService)
     {
         _profilerService = profilerService;
         _configStore = configStore;
         _fingerprintService = fingerprintService;
         _streamingService = streamingService;
+        _memoryService = memoryService;
     }
 
     /// <summary>
@@ -89,7 +92,19 @@ public class EventRetrievalTools
             }
 
             var totalCount = events.Count;
+            var allEventsForMemory = events; // Pre-pagination snapshot for memory
             events = events.Skip(offset).Take(Math.Min(limit, 10000)).ToList();
+
+            // Auto-save to memory (fire-and-forget, never blocks the response)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var serverName = MemoryService.ExtractServerName(connectionString);
+                    await _memoryService.SaveCaptureAsync(serverName, sessionName, allEventsForMemory);
+                }
+                catch { /* Memory failures never break primary operations */ }
+            });
 
             var result = new
             {
@@ -268,6 +283,17 @@ public class EventRetrievalTools
                     writes = events.Sum(e => e.Writes)
                 }
             };
+
+            // Auto-save to memory with insights
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var serverName = MemoryService.ExtractServerName(connectionString);
+                    await _memoryService.SaveCaptureAsync(serverName, sessionName, events, insights: insights);
+                }
+                catch { /* Memory failures never break primary operations */ }
+            });
 
             var result = new { summary, groupBy, topN, stats, insights };
 
@@ -681,6 +707,20 @@ public class EventRetrievalTools
             finally
             {
                 _streamingService.StopStreaming(streamId);
+            }
+
+            // Auto-save streamed events to memory
+            if (events.Count > 0)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var serverName = MemoryService.ExtractServerName(connectionString);
+                        await _memoryService.SaveCaptureAsync(serverName, sessionName, events);
+                    }
+                    catch { /* Memory failures never break primary operations */ }
+                });
             }
 
             var result = new

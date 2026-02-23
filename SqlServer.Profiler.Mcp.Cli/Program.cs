@@ -10,15 +10,24 @@ var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
 
 // Build DI container (same services as the main MCP server)
 var services = new ServiceCollection();
+services.AddLogging();
 services.AddSingleton<IProfilerService, ProfilerService>();
 services.AddSingleton<IQueryFingerprintService, QueryFingerprintService>();
 services.AddSingleton<IWaitStatsService, WaitStatsService>();
 services.AddSingleton<SessionConfigStore>();
+services.AddSingleton<EventStreamingService>();
+services.AddSingleton<IEventStreamingService>(sp => sp.GetRequiredService<EventStreamingService>());
+services.AddSingleton<IMemoryService, MemoryService>();
 services.AddTransient<SessionManagementTools>();
 services.AddTransient<EventRetrievalTools>();
 services.AddTransient<PermissionTools>();
 services.AddTransient<DiagnosticTools>();
+services.AddTransient<MemoryTools>();
 var provider = services.BuildServiceProvider();
+
+// Start MemoryService hosted service
+var memoryService = provider.GetRequiredService<IMemoryService>() as Microsoft.Extensions.Hosting.IHostedService;
+if (memoryService != null) await memoryService.StartAsync(CancellationToken.None);
 
 // Discover all MCP tools via reflection
 var toolRegistry = DiscoverTools();

@@ -17,6 +17,7 @@ public class ProfilerController : ControllerBase
     private readonly EventRetrievalTools _eventTools;
     private readonly PermissionTools _permissionTools;
     private readonly DiagnosticTools _diagnosticTools;
+    private readonly MemoryTools _memoryTools;
     private readonly IEventStreamingService _streamingService;
     private readonly IConfiguration _configuration;
 
@@ -25,6 +26,7 @@ public class ProfilerController : ControllerBase
         EventRetrievalTools eventTools,
         PermissionTools permissionTools,
         DiagnosticTools diagnosticTools,
+        MemoryTools memoryTools,
         IEventStreamingService streamingService,
         IConfiguration configuration)
     {
@@ -32,6 +34,7 @@ public class ProfilerController : ControllerBase
         _eventTools = eventTools;
         _permissionTools = permissionTools;
         _diagnosticTools = diagnosticTools;
+        _memoryTools = memoryTools;
         _streamingService = streamingService;
         _configuration = configuration;
     }
@@ -382,6 +385,113 @@ public class ProfilerController : ControllerBase
     {
         var connStr = ResolveConnectionString(connectionString);
         var result = await _diagnosticTools.HealthCheck(connStr, sessionName ?? "", slowQueryThresholdMs, responseFormat);
+        return JsonContent(result);
+    }
+
+    // ──────────────────────────────────────────────
+    // Memory
+    // ──────────────────────────────────────────────
+
+    /// <summary>
+    /// List past profiling captures stored in memory.
+    /// Memory is auto-populated when events are retrieved.
+    /// </summary>
+    [HttpGet("memory/captures")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> ListCaptures(
+        [FromQuery] string? serverName = null,
+        [FromQuery] string? sessionName = null,
+        [FromQuery] string? tag = null,
+        [FromQuery] string? since = null,
+        [FromQuery] int limit = 20,
+        [FromQuery] string responseFormat = "Json")
+    {
+        var result = await _memoryTools.ListCaptures(serverName, sessionName, tag, since, limit, responseFormat);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Get full details of a specific past capture by its ID.
+    /// </summary>
+    [HttpGet("memory/captures/{captureId}")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> GetCapture(
+        [FromRoute] string captureId,
+        [FromQuery] string responseFormat = "Json")
+    {
+        var result = await _memoryTools.GetCapture(captureId, responseFormat);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Get the performance history of a specific query fingerprint across all captures.
+    /// </summary>
+    [HttpGet("memory/queries/{queryFingerprint}/history")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> QueryHistory(
+        [FromRoute] string queryFingerprint,
+        [FromQuery] string? connectionString = null,
+        [FromQuery] string responseFormat = "Json")
+    {
+        var connStr = ResolveConnectionString(connectionString);
+        var result = await _memoryTools.QueryHistory(connStr, queryFingerprint, responseFormat);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Search through remembered queries by SQL text, database, execution count, or duration.
+    /// </summary>
+    [HttpGet("memory/queries/search")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> SearchQueries(
+        [FromQuery] string? connectionString = null,
+        [FromQuery] string? sqlContains = null,
+        [FromQuery] string? database = null,
+        [FromQuery] int? minExecutions = null,
+        [FromQuery] int? minAvgDurationMs = null,
+        [FromQuery] int limit = 20,
+        [FromQuery] string responseFormat = "Json")
+    {
+        var connStr = ResolveConnectionString(connectionString);
+        var result = await _memoryTools.SearchQueries(connStr, sqlContains, database, minExecutions, minAvgDurationMs, limit, responseFormat);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Add tags or a note to a past capture for easier retrieval later.
+    /// </summary>
+    [HttpPost("memory/captures/{captureId}/tag")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> TagCapture(
+        [FromRoute] string captureId,
+        [FromQuery] string tags,
+        [FromQuery] string? note = null)
+    {
+        var result = await _memoryTools.TagCapture(captureId, tags, note);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Show memory system statistics: total captures, disk usage, date range.
+    /// </summary>
+    [HttpGet("memory/stats")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> MemoryStats(
+        [FromQuery] string responseFormat = "Json")
+    {
+        var result = await _memoryTools.GetMemoryStats(responseFormat);
+        return JsonContent(result);
+    }
+
+    /// <summary>
+    /// Purge memory for a specific server or clean up expired entries. Use 'expired' to only clean up old data.
+    /// </summary>
+    [HttpDelete("memory/{serverName}")]
+    [ProducesResponseType(typeof(string), 200)]
+    public async Task<IActionResult> PurgeMemory(
+        [FromRoute] string serverName)
+    {
+        var result = await _memoryTools.PurgeMemory(serverName);
         return JsonContent(result);
     }
 

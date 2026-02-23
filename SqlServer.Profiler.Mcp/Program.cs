@@ -43,6 +43,8 @@ public class Program
         builder.Services.AddSingleton<EventStreamingService>();
         builder.Services.AddSingleton<IEventStreamingService>(sp => sp.GetRequiredService<EventStreamingService>());
         builder.Services.AddHostedService(sp => sp.GetRequiredService<EventStreamingService>());
+        builder.Services.AddSingleton<IMemoryService, MemoryService>();
+        builder.Services.AddHostedService(sp => (MemoryService)sp.GetRequiredService<IMemoryService>());
 
         // Register MCP Server
         builder.Services.AddMcpServer(options =>
