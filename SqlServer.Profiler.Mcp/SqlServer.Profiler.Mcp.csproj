@@ -36,6 +36,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="SqlServer.Profiler.Mcp.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Native SQL Server connectivity - NO ODBC DRIVERS REQUIRED -->
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     

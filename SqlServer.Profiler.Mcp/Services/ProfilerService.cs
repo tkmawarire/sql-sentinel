@@ -730,7 +730,7 @@ public partial class ProfilerService : IProfilerService
     // XML parsers for deadlock and blocking events
     // ──────────────────────────────────────────────
 
-    private static DeadlockEvent ParseDeadlockXml(string xmlString, DateTime? timestamp)
+    internal static DeadlockEvent ParseDeadlockXml(string xmlString, DateTime? timestamp)
     {
         var doc = XDocument.Parse(xmlString);
         var deadlockNode = doc.Descendants("deadlock").FirstOrDefault() ?? doc.Root!;
@@ -777,7 +777,7 @@ public partial class ProfilerService : IProfilerService
         };
     }
 
-    private static BlockingEvent ParseBlockingXml(string xmlString, DateTime? timestamp)
+    internal static BlockingEvent ParseBlockingXml(string xmlString, DateTime? timestamp)
     {
         var doc = XDocument.Parse(xmlString);
         var root = doc.Root!;

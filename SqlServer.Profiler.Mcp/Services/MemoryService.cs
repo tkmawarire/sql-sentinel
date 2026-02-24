@@ -666,13 +666,13 @@ public class MemoryService : IMemoryService, IHostedService, IDisposable
         }
     }
 
-    private static string HashServerName(string serverName)
+    internal static string HashServerName(string serverName)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(serverName.ToLowerInvariant()));
         return Convert.ToHexString(bytes)[..12].ToLowerInvariant();
     }
 
-    private static string SanitizeFilename(string name)
+    internal static string SanitizeFilename(string name)
     {
         var invalid = Path.GetInvalidFileNameChars();
         var sb = new StringBuilder(name.Length);
@@ -683,7 +683,7 @@ public class MemoryService : IMemoryService, IHostedService, IDisposable
         return sb.ToString();
     }
 
-    private static string Truncate(string text, int maxLength)
+    internal static string Truncate(string text, int maxLength)
     {
         if (string.IsNullOrEmpty(text)) return "";
         return text.Length <= maxLength ? text : text[..maxLength];
