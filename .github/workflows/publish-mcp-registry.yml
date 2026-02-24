@@ -105,7 +105,8 @@ jobs:
               data = json.load(f)
           data['version'] = version
           for pkg in data.get('packages', []):
-              pkg['version'] = version
+              if pkg.get('registryType') != 'oci':
+                  pkg['version'] = version
           with open('.mcp/server.json', 'w') as f:
               json.dump(data, f, indent=2)
           "

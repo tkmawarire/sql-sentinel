@@ -19,7 +19,6 @@
     {
       "registryType": "oci",
       "identifier": "ghcr.io/tkmawarire/sql-sentinel-mcp",
-      "version": "2.1.0",
       "transport": {
         "type": "stdio"
       },
