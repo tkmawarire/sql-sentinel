@@ -56,6 +56,7 @@ docker pull ghcr.io/tkmawarire/sql-sentinel-mcp:latest
     "sql-sentinel": {
       "command": "docker",
       "args": ["run", "-i", "--rm", "--network", "host",
+               "-e", "SQL_SENTINEL_CONNECTION_STRING=Server=localhost;Database=master;User Id=sa;Password=YourPassword;TrustServerCertificate=true",
                "ghcr.io/tkmawarire/sql-sentinel-mcp:latest"]
     }
   }
@@ -65,10 +66,16 @@ docker pull ghcr.io/tkmawarire/sql-sentinel-mcp:latest
 #### Claude Code
 
 ```bash
-claude mcp add sql-sentinel -- docker run -i --rm --network host ghcr.io/tkmawarire/sql-sentinel-mcp:latest
+claude mcp add sql-sentinel \
+  -e SQL_SENTINEL_CONNECTION_STRING="Server=localhost;Database=master;User Id=sa;Password=YourPassword;TrustServerCertificate=true" \
+  -- docker run -i --rm --network host \
+  -e SQL_SENTINEL_CONNECTION_STRING \
+  ghcr.io/tkmawarire/sql-sentinel-mcp:latest
 ```
 
 > **Network access**: The `-i` flag is required for stdio transport. Use `--network host` so the container can reach SQL Server on your host machine. For remote SQL Server, omit `--network host` and use the accessible hostname in your connection string.
+>
+> **Connection string**: Set `SQL_SENTINEL_CONNECTION_STRING` via `-e` so you don't need to pass it on every tool call. You can still override it per-call by passing the `connectionString` parameter explicitly.
 
 ### Option 2: .NET Global Tool (NuGet)
 
@@ -82,7 +89,10 @@ dotnet tool install -g Neofenyx.SqlSentinel.Mcp
 {
   "mcpServers": {
     "sql-sentinel": {
-      "command": "sql-sentinel-mcp"
+      "command": "sql-sentinel-mcp",
+      "env": {
+        "SQL_SENTINEL_CONNECTION_STRING": "Server=localhost;Database=master;User Id=sa;Password=YourPassword;TrustServerCertificate=true"
+      }
     }
   }
 }
@@ -121,6 +131,12 @@ dotnet publish SqlServer.Profiler.Mcp/ -c Release -r osx-x64 --self-contained
 Output will be in `bin/Release/net9.0/{runtime}/publish/`
 
 ## Connection Strings
+
+Every tool accepts a `connectionString` parameter. If omitted, the server falls back to the `SQL_SENTINEL_CONNECTION_STRING` environment variable. Set it once to avoid passing the connection string on every call:
+
+```bash
+export SQL_SENTINEL_CONNECTION_STRING="Server=localhost;Database=master;User Id=sa;Password=YourPassword;TrustServerCertificate=false;Encrypt=true"
+```
 
 **SQL Authentication:**
 ```
@@ -382,6 +398,10 @@ sql-profiler-mcp/
 ├── SqlServer.Profiler.Mcp.Cli/            # Debug CLI (REPL + script mode)
 │   ├── SqlServer.Profiler.Mcp.Cli.csproj
 │   └── Program.cs
+├── SqlServer.Profiler.Mcp.Tests/          # xUnit tests for core MCP library (228 tests)
+│   └── ...
+├── SqlServer.Profiler.Mcp.Api.Tests/      # xUnit tests for API project (29 tests)
+│   └── ...
 ├── Dockerfile                             # Multi-stage build (bookworm-slim)
 ├── .dockerignore
 ├── SqlServer.Profiler.Mcp.slnx           # Solution file
