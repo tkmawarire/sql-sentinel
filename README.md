@@ -124,13 +124,16 @@ Output will be in `bin/Release/net9.0/{runtime}/publish/`
 
 **SQL Authentication:**
 ```
-Server=localhost;Database=master;User Id=sa;Password=YourPassword;TrustServerCertificate=true
+Server=localhost;Database=master;User Id=sa;Password=YourPassword;TrustServerCertificate=false;Encrypt=true
 ```
 
 **Windows Authentication:**
 ```
-Server=localhost;Database=master;Integrated Security=true;TrustServerCertificate=true
+Server=localhost;Database=master;Integrated Security=true;TrustServerCertificate=false;Encrypt=true
 ```
+
+> **Note:** Only use `TrustServerCertificate=true` in development environments with self-signed certificates.
+> For production, always use `TrustServerCertificate=false` with a valid SSL certificate.
 
 **Azure SQL:**
 ```
@@ -195,7 +198,7 @@ Server=yourserver.database.windows.net;Database=yourdb;User Id=user;Password=pas
 ```
 Agent: sqlsentinel_quick_capture(
     sessionName: "debug_api",
-    connectionString: "Server=localhost;Database=master;Integrated Security=true;TrustServerCertificate=true",
+    connectionString: "Server=localhost;Database=master;Integrated Security=true;TrustServerCertificate=false;Encrypt=true",
     applications: "MyWebApp",
     minDurationMs: 100
 )
@@ -288,7 +291,7 @@ Agent: sqlsentinel_health_check(
 
 ```
 Agent: sqlsentinel_list_tables(
-    connectionString: "Server=localhost;Database=AdventureWorks;Integrated Security=true;TrustServerCertificate=true"
+    connectionString: "Server=localhost;Database=AdventureWorks;Integrated Security=true;TrustServerCertificate=false;Encrypt=true"
 )
 
 Agent: sqlsentinel_describe_table(

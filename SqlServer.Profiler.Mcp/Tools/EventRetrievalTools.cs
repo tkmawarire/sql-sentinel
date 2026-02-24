@@ -4,6 +4,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using SqlServer.Profiler.Mcp.Models;
 using SqlServer.Profiler.Mcp.Services;
+using Microsoft.Extensions.Logging;
 using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
@@ -19,19 +20,22 @@ public class EventRetrievalTools
     private readonly IQueryFingerprintService _fingerprintService;
     private readonly IEventStreamingService _streamingService;
     private readonly IMemoryService _memoryService;
+    private readonly ILogger<EventRetrievalTools> _logger;
 
     public EventRetrievalTools(
         IProfilerService profilerService,
         SessionConfigStore configStore,
         IQueryFingerprintService fingerprintService,
         IEventStreamingService streamingService,
-        IMemoryService memoryService)
+        IMemoryService memoryService,
+        ILogger<EventRetrievalTools> logger)
     {
         _profilerService = profilerService;
         _configStore = configStore;
         _fingerprintService = fingerprintService;
         _streamingService = streamingService;
         _memoryService = memoryService;
+        _logger = logger;
     }
 
     /// <summary>
@@ -130,7 +134,7 @@ public class EventRetrievalTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message,
+                error = ErrorSanitizer.Sanitize(ex, _logger),
                 suggestion = "Ensure session exists and is running. Check sqlsentinel_list_sessions."
             }, JsonOptions.Default);
         }
@@ -312,7 +316,7 @@ public class EventRetrievalTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }
@@ -447,7 +451,7 @@ public class EventRetrievalTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }
@@ -476,7 +480,7 @@ public class EventRetrievalTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }
@@ -753,7 +757,7 @@ public class EventRetrievalTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message,
+                error = ErrorSanitizer.Sanitize(ex, _logger),
                 suggestion = "Ensure the session exists and is running."
             }, JsonOptions.Default);
         }

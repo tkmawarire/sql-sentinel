@@ -53,7 +53,13 @@ LABEL org.opencontainers.image.version="2.1.0"
 LABEL org.opencontainers.image.source="https://github.com/tkmawarire/sql-sentinel"
 LABEL org.opencontainers.image.licenses="MIT"
 
+# Run as non-root user for security
+RUN groupadd --gid 1654 sentinel \
+    && useradd --uid 1654 --gid sentinel --shell /bin/false --create-home sentinel
+
 COPY --from=build /app/publish .
+
+USER sentinel
 
 # stdio transport: reads stdin, writes stdout. No ports exposed.
 # Usage: docker run -i --rm ghcr.io/tkmawarire/sql-sentinel-mcp:latest

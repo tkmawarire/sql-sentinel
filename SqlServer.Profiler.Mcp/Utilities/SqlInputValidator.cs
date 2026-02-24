@@ -112,6 +112,149 @@ public static partial class SqlInputValidator
             trimmed.StartsWith(k, StringComparison.OrdinalIgnoreCase));
     }
 
+    // ── Statement validation for DatabaseTools ─────────────────
+
+    private static readonly string[] SelectDenyList =
+    [
+        "DROP", "DELETE", "TRUNCATE", "ALTER", "CREATE", "INSERT", "UPDATE",
+        "EXEC", "EXECUTE", "xp_", "sp_OA", "OPENROWSET", "OPENDATASOURCE",
+        "BULK INSERT", "SHUTDOWN", "RECONFIGURE"
+    ];
+
+    private static readonly string[] CreateTableDenyList =
+    [
+        "CREATE LOGIN", "CREATE USER", "CREATE DATABASE", "CREATE PROCEDURE",
+        "CREATE FUNCTION", "CREATE TRIGGER", "EXEC", "EXECUTE",
+        "xp_", "sp_OA", "OPENROWSET"
+    ];
+
+    private static readonly string[] InsertDenyList =
+    [
+        "DROP", "TRUNCATE", "ALTER", "CREATE", "EXEC", "EXECUTE",
+        "xp_", "sp_OA", "OPENROWSET"
+    ];
+
+    private static readonly string[] UpdateDenyList =
+    [
+        "DROP", "TRUNCATE", "ALTER", "CREATE", "EXEC", "EXECUTE",
+        "xp_", "sp_OA", "OPENROWSET"
+    ];
+
+    private static readonly string[] DropTableDenyList =
+    [
+        "DROP DATABASE", "DROP LOGIN", "DROP USER",
+        "EXEC", "EXECUTE", "xp_", "sp_OA"
+    ];
+
+    /// <summary>
+    /// Returns the appropriate deny list for a given SQL statement context.
+    /// </summary>
+    public static string[] GetDenyList(string context) => context.ToUpperInvariant() switch
+    {
+        "SELECT" => SelectDenyList,
+        "CREATE TABLE" => CreateTableDenyList,
+        "INSERT" => InsertDenyList,
+        "UPDATE" => UpdateDenyList,
+        "DROP TABLE" => DropTableDenyList,
+        _ => []
+    };
+
+    /// <summary>
+    /// Validates a SQL statement against a deny list of dangerous keywords.
+    /// Returns (true, null) if valid, or (false, errorMessage) if blocked.
+    /// </summary>
+    public static (bool IsValid, string? Error) ValidateStatement(string sql, string context, string[]? denyPatterns = null)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+            return (false, "SQL statement cannot be empty.");
+
+        denyPatterns ??= GetDenyList(context);
+
+        // Check for statement separators (batch injection)
+        if (ContainsStatementSeparator(sql))
+            return (false, "Multiple SQL statements are not allowed. Remove ';' or 'GO' separators.");
+
+        // Check deny list — case-insensitive word boundary matching
+        var upper = sql.ToUpperInvariant();
+        foreach (var pattern in denyPatterns)
+        {
+            var patternUpper = pattern.ToUpperInvariant();
+
+            // For multi-word patterns (e.g., "CREATE LOGIN"), check directly
+            if (patternUpper.Contains(' '))
+            {
+                if (upper.Contains(patternUpper))
+                    return (false, $"Statement contains blocked keyword '{pattern}' in {context} context.");
+            }
+            else
+            {
+                // For single-word patterns, check with word boundary awareness
+                var idx = 0;
+                while ((idx = upper.IndexOf(patternUpper, idx, StringComparison.Ordinal)) >= 0)
+                {
+                    // Check if it's a standalone word (not part of a longer identifier)
+                    var before = idx > 0 ? upper[idx - 1] : ' ';
+                    var after = idx + patternUpper.Length < upper.Length ? upper[idx + patternUpper.Length] : ' ';
+
+                    // For prefixes like "xp_" and "sp_OA", only check the before boundary
+                    var isPrefix = patternUpper.EndsWith('_');
+                    var isWordBefore = !char.IsLetterOrDigit(before) && before != '_';
+                    var isWordAfter = isPrefix || (!char.IsLetterOrDigit(after) && after != '_');
+
+                    if (isWordBefore && isWordAfter)
+                        return (false, $"Statement contains blocked keyword '{pattern}' in {context} context.");
+
+                    idx += patternUpper.Length;
+                }
+            }
+        }
+
+        return (true, null);
+    }
+
+    /// <summary>
+    /// Detects statement separators (';' outside string literals, 'GO' on its own line)
+    /// that indicate multiple statements in a batch.
+    /// </summary>
+    public static bool ContainsStatementSeparator(string sql)
+    {
+        if (string.IsNullOrEmpty(sql))
+            return false;
+
+        // Check for ';' outside of string literals
+        var inString = false;
+        for (var i = 0; i < sql.Length; i++)
+        {
+            if (sql[i] == '\'')
+            {
+                // Handle escaped quotes ('')
+                if (inString && i + 1 < sql.Length && sql[i + 1] == '\'')
+                {
+                    i++; // Skip escaped quote
+                    continue;
+                }
+                inString = !inString;
+            }
+            else if (sql[i] == ';' && !inString)
+            {
+                // Allow trailing semicolons with only whitespace after
+                var remaining = sql[(i + 1)..].Trim();
+                if (remaining.Length > 0)
+                    return true;
+            }
+        }
+
+        // Check for 'GO' on its own line (batch separator)
+        var lines = sql.Split('\n');
+        foreach (var line in lines)
+        {
+            if (line.Trim().Equals("GO", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
     [GeneratedRegex(@"^[\w\-]+\z", RegexOptions.Compiled)]
     private static partial Regex ValidSessionNameRegex();
 

@@ -3,6 +3,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using SqlServer.Profiler.Mcp.Models;
 using SqlServer.Profiler.Mcp.Services;
+using Microsoft.Extensions.Logging;
 using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
@@ -39,11 +40,13 @@ public class SessionManagementTools
 {
     private readonly IProfilerService _profilerService;
     private readonly SessionConfigStore _configStore;
+    private readonly ILogger<SessionManagementTools> _logger;
 
-    public SessionManagementTools(IProfilerService profilerService, SessionConfigStore configStore)
+    public SessionManagementTools(IProfilerService profilerService, SessionConfigStore configStore, ILogger<SessionManagementTools> logger)
     {
         _profilerService = profilerService;
         _configStore = configStore;
+        _logger = logger;
     }
 
     /// <summary>
@@ -120,7 +123,7 @@ public class SessionManagementTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message,
+                error = ErrorSanitizer.Sanitize(ex, _logger),
                 suggestion = "Check connection string, ensure you have ALTER ANY EVENT SESSION permission, and verify session name doesn't already exist."
             }, JsonOptions.Default);
         }
@@ -146,7 +149,7 @@ public class SessionManagementTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message,
+                error = ErrorSanitizer.Sanitize(ex, _logger),
                 suggestion = "Ensure session exists (use sqlsentinel_list_sessions) and you have ALTER ANY EVENT SESSION permission."
             }, JsonOptions.Default);
         }
@@ -172,7 +175,7 @@ public class SessionManagementTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }
@@ -198,7 +201,7 @@ public class SessionManagementTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }
@@ -227,7 +230,7 @@ public class SessionManagementTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }
@@ -291,7 +294,7 @@ public class SessionManagementTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }

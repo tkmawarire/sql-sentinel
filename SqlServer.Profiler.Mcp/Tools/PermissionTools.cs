@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using ModelContextProtocol.Server;
+using Microsoft.Extensions.Logging;
 using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
@@ -12,6 +13,13 @@ namespace SqlServer.Profiler.Mcp.Tools;
 [McpServerToolType]
 public class PermissionTools
 {
+    private readonly ILogger<PermissionTools> _logger;
+
+    public PermissionTools(ILogger<PermissionTools> logger)
+    {
+        _logger = logger;
+    }
+
     private static readonly string[] RequiredPermissions =
     [
         "ALTER ANY EVENT SESSION",
@@ -128,7 +136,7 @@ public class PermissionTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message,
+                error = ErrorSanitizer.Sanitize(ex, _logger),
                 suggestion = "Check connection string credentials and SQL Server accessibility."
             }, JsonOptions.Default);
         }
@@ -235,7 +243,7 @@ public class PermissionTools
                 }
                 catch (Exception ex)
                 {
-                    failedPermissions.Add((permission, ex.Message));
+                    failedPermissions.Add((permission, ErrorSanitizer.Sanitize(ex, _logger)));
                 }
             }
 
@@ -278,7 +286,7 @@ public class PermissionTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message,
+                error = ErrorSanitizer.Sanitize(ex, _logger),
                 suggestion = "Check connection string credentials and ensure you have sysadmin privileges."
             }, JsonOptions.Default);
         }

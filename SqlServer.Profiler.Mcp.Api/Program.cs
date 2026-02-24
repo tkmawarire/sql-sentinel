@@ -76,13 +76,16 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
-// Enable Swagger UI in all environments for debugging purposes
-app.UseSwagger();
-app.UseSwaggerUI(options =>
+// Only enable Swagger in Development — this is a localhost-only debug tool
+if (app.Environment.IsDevelopment())
 {
-    options.SwaggerEndpoint("/swagger/v1/swagger.json", "SQL Sentinel - Debug API v1");
-    options.RoutePrefix = string.Empty; // Serve Swagger UI at root
-});
+    app.UseSwagger();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "SQL Sentinel - Debug API v1");
+        options.RoutePrefix = string.Empty; // Serve Swagger UI at root
+    });
+}
 
 app.MapControllers();
 

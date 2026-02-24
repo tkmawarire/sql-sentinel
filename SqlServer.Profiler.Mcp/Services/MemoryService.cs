@@ -65,6 +65,7 @@ public class MemoryService : IMemoryService, IHostedService, IDisposable
     private readonly ConcurrentDictionary<string, DateTime> _recentSaves = new();
     private Timer? _cleanupTimer;
     private MemoryConfig _config = new();
+    private bool _disabled;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -91,10 +92,37 @@ public class MemoryService : IMemoryService, IHostedService, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // Check if memory persistence is disabled
+        var memoryEnabled = Environment.GetEnvironmentVariable("SQLSENTINEL_MEMORY_ENABLED");
+        if (string.Equals(memoryEnabled, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            _disabled = true;
+            _logger.LogInformation("MemoryService disabled via SQLSENTINEL_MEMORY_ENABLED=false");
+            return;
+        }
+
         try
         {
             Directory.CreateDirectory(_basePath);
             Directory.CreateDirectory(Path.Combine(_basePath, "queries"));
+
+            // Set owner-only permissions on Unix systems
+            if (!OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    File.SetUnixFileMode(_basePath,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    var queriesPath = Path.Combine(_basePath, "queries");
+                    File.SetUnixFileMode(queriesPath,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to set directory permissions on {Path}", _basePath);
+                }
+            }
+
             await LoadConfigAsync(cancellationToken);
             await CleanupExpiredAsync(cancellationToken);
             _cleanupTimer = new Timer(async _ =>
@@ -134,6 +162,9 @@ public class MemoryService : IMemoryService, IHostedService, IDisposable
         List<HealthInsight>? insights = null,
         CancellationToken ct = default)
     {
+        if (_disabled)
+            return new CaptureMemory { Id = "disabled", ServerName = serverName, SessionName = sessionName };
+
         // Deduplication guard: same server+session within 60s is likely redundant
         var dedupeKey = $"{serverName}|{sessionName}";
         if (_recentSaves.TryGetValue(dedupeKey, out var lastSave) &&
@@ -274,6 +305,8 @@ public class MemoryService : IMemoryService, IHostedService, IDisposable
         int limit = 20,
         CancellationToken ct = default)
     {
+        if (_disabled) return [];
+
         var captures = await ReadAllCapturesAsync(ct);
 
         var filtered = captures

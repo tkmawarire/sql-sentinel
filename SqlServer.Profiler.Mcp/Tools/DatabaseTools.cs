@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using SqlServer.Profiler.Mcp.Models;
 using SqlServer.Profiler.Mcp.Utilities;
@@ -14,6 +15,13 @@ namespace SqlServer.Profiler.Mcp.Tools;
 [McpServerToolType]
 public class DatabaseTools
 {
+    private const int DefaultCommandTimeoutSeconds = 30;
+    private readonly ILogger<DatabaseTools> _logger;
+
+    public DatabaseTools(ILogger<DatabaseTools> logger)
+    {
+        _logger = logger;
+    }
     private const string ListTablesQuery = """
         SELECT TABLE_SCHEMA, TABLE_NAME
         FROM INFORMATION_SCHEMA.TABLES
@@ -27,7 +35,7 @@ public class DatabaseTools
         Idempotent = true,
         Destructive = false)]
     [Description("Lists all user tables in the SQL Server database. Returns schema-qualified table names (e.g., 'dbo.Users').")]
-    public static async Task<string> ListTables(
+    public async Task<string> ListTables(
         [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
         try
@@ -37,6 +45,7 @@ public class DatabaseTools
             await conn.OpenAsync();
 
             await using var cmd = new SqlCommand(ListTablesQuery, conn);
+            cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
             using var reader = await cmd.ExecuteReaderAsync();
 
             var tables = new List<string>();
@@ -51,7 +60,7 @@ public class DatabaseTools
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(
-                new DbOperationResult(success: false, error: ex.Message), JsonOptions.Default);
+                new DbOperationResult(success: false, error: ErrorSanitizer.Sanitize(ex, _logger)), JsonOptions.Default);
         }
     }
 
@@ -61,7 +70,7 @@ public class DatabaseTools
         Idempotent = true,
         Destructive = false)]
     [Description("Returns detailed schema information for a table including columns, indexes, constraints, and foreign keys.")]
-    public static async Task<string> DescribeTable(
+    public async Task<string> DescribeTable(
         [Description("Table name, optionally schema-qualified (e.g., 'dbo.Users' or 'Users')")] string name,
         [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
@@ -159,6 +168,7 @@ public class DatabaseTools
             // Table info
             await using (var cmd = new SqlCommand(tableInfoQuery, conn))
             {
+                cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
                 cmd.Parameters.AddWithValue("@TableName", name);
                 cmd.Parameters.AddWithValue("@TableSchema", (object?)schema ?? DBNull.Value);
                 using var reader = await cmd.ExecuteReaderAsync();
@@ -185,6 +195,7 @@ public class DatabaseTools
             // Columns
             await using (var cmd = new SqlCommand(columnsQuery, conn))
             {
+                cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
                 cmd.Parameters.AddWithValue("@TableName", name);
                 cmd.Parameters.AddWithValue("@TableSchema", (object?)schema ?? DBNull.Value);
                 using var reader = await cmd.ExecuteReaderAsync();
@@ -208,6 +219,7 @@ public class DatabaseTools
             // Indexes
             await using (var cmd = new SqlCommand(indexesQuery, conn))
             {
+                cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
                 cmd.Parameters.AddWithValue("@TableName", name);
                 cmd.Parameters.AddWithValue("@TableSchema", (object?)schema ?? DBNull.Value);
                 using var reader = await cmd.ExecuteReaderAsync();
@@ -228,6 +240,7 @@ public class DatabaseTools
             // Constraints
             await using (var cmd = new SqlCommand(constraintsQuery, conn))
             {
+                cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
                 cmd.Parameters.AddWithValue("@TableName", name);
                 cmd.Parameters.AddWithValue("@TableSchema", (object?)schema ?? DBNull.Value);
                 using var reader = await cmd.ExecuteReaderAsync();
@@ -247,6 +260,7 @@ public class DatabaseTools
             // Foreign Keys
             await using (var cmd = new SqlCommand(foreignKeysQuery, conn))
             {
+                cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
                 cmd.Parameters.AddWithValue("@TableName", name);
                 cmd.Parameters.AddWithValue("@TableSchema", (object?)schema ?? DBNull.Value);
                 using var reader = await cmd.ExecuteReaderAsync();
@@ -273,7 +287,7 @@ public class DatabaseTools
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(
-                new DbOperationResult(success: false, error: ex.Message), JsonOptions.Default);
+                new DbOperationResult(success: false, error: ErrorSanitizer.Sanitize(ex, _logger)), JsonOptions.Default);
         }
     }
 
@@ -282,7 +296,7 @@ public class DatabaseTools
         ReadOnly = false,
         Destructive = false)]
     [Description("Creates a new table in the SQL Server database. Expects a valid CREATE TABLE SQL statement.")]
-    public static async Task<string> CreateTable(
+    public async Task<string> CreateTable(
         [Description("CREATE TABLE SQL statement")] string sql,
         [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
@@ -293,6 +307,13 @@ public class DatabaseTools
                 JsonOptions.Default);
         }
 
+        var (isValid, validationError) = SqlInputValidator.ValidateStatement(sql, "CREATE TABLE");
+        if (!isValid)
+        {
+            return JsonSerializer.Serialize(
+                new DbOperationResult(success: false, error: validationError), JsonOptions.Default);
+        }
+
         try
         {
             connectionString = ConnectionStringResolver.Resolve(connectionString);
@@ -300,6 +321,7 @@ public class DatabaseTools
             await conn.OpenAsync();
 
             await using var cmd = new SqlCommand(sql, conn);
+            cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
             await cmd.ExecuteNonQueryAsync();
 
             return JsonSerializer.Serialize(
@@ -308,7 +330,7 @@ public class DatabaseTools
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(
-                new DbOperationResult(success: false, error: ex.Message), JsonOptions.Default);
+                new DbOperationResult(success: false, error: ErrorSanitizer.Sanitize(ex, _logger)), JsonOptions.Default);
         }
     }
 
@@ -317,7 +339,7 @@ public class DatabaseTools
         ReadOnly = false,
         Destructive = false)]
     [Description("Inserts data into a table. Expects a valid INSERT SQL statement.")]
-    public static async Task<string> InsertData(
+    public async Task<string> InsertData(
         [Description("INSERT SQL statement")] string sql,
         [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
@@ -328,6 +350,13 @@ public class DatabaseTools
                 JsonOptions.Default);
         }
 
+        var (isValid, validationError) = SqlInputValidator.ValidateStatement(sql, "INSERT");
+        if (!isValid)
+        {
+            return JsonSerializer.Serialize(
+                new DbOperationResult(success: false, error: validationError), JsonOptions.Default);
+        }
+
         try
         {
             connectionString = ConnectionStringResolver.Resolve(connectionString);
@@ -335,6 +364,7 @@ public class DatabaseTools
             await conn.OpenAsync();
 
             await using var cmd = new SqlCommand(sql, conn);
+            cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
             var rows = await cmd.ExecuteNonQueryAsync();
 
             return JsonSerializer.Serialize(
@@ -343,7 +373,7 @@ public class DatabaseTools
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(
-                new DbOperationResult(success: false, error: ex.Message), JsonOptions.Default);
+                new DbOperationResult(success: false, error: ErrorSanitizer.Sanitize(ex, _logger)), JsonOptions.Default);
         }
     }
 
@@ -353,7 +383,7 @@ public class DatabaseTools
         Idempotent = true,
         Destructive = false)]
     [Description("Executes a SELECT query against the SQL Server database and returns the results.")]
-    public static async Task<string> ReadData(
+    public async Task<string> ReadData(
         [Description("SELECT SQL query to execute")] string sql,
         [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
@@ -364,6 +394,13 @@ public class DatabaseTools
                 JsonOptions.Default);
         }
 
+        var (isValid, validationError) = SqlInputValidator.ValidateStatement(sql, "SELECT");
+        if (!isValid)
+        {
+            return JsonSerializer.Serialize(
+                new DbOperationResult(success: false, error: validationError), JsonOptions.Default);
+        }
+
         try
         {
             connectionString = ConnectionStringResolver.Resolve(connectionString);
@@ -371,6 +408,7 @@ public class DatabaseTools
             await conn.OpenAsync();
 
             await using var cmd = new SqlCommand(sql, conn);
+            cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
             using var reader = await cmd.ExecuteReaderAsync();
 
             var results = new List<Dictionary<string, object?>>();
@@ -390,7 +428,7 @@ public class DatabaseTools
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(
-                new DbOperationResult(success: false, error: ex.Message), JsonOptions.Default);
+                new DbOperationResult(success: false, error: ErrorSanitizer.Sanitize(ex, _logger)), JsonOptions.Default);
         }
     }
 
@@ -399,7 +437,7 @@ public class DatabaseTools
         ReadOnly = false,
         Destructive = true)]
     [Description("Updates data in a table. Expects a valid UPDATE SQL statement.")]
-    public static async Task<string> UpdateData(
+    public async Task<string> UpdateData(
         [Description("UPDATE SQL statement")] string sql,
         [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
@@ -410,6 +448,13 @@ public class DatabaseTools
                 JsonOptions.Default);
         }
 
+        var (isValid, validationError) = SqlInputValidator.ValidateStatement(sql, "UPDATE");
+        if (!isValid)
+        {
+            return JsonSerializer.Serialize(
+                new DbOperationResult(success: false, error: validationError), JsonOptions.Default);
+        }
+
         try
         {
             connectionString = ConnectionStringResolver.Resolve(connectionString);
@@ -417,6 +462,7 @@ public class DatabaseTools
             await conn.OpenAsync();
 
             await using var cmd = new SqlCommand(sql, conn);
+            cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
             var rows = await cmd.ExecuteNonQueryAsync();
 
             return JsonSerializer.Serialize(
@@ -425,7 +471,7 @@ public class DatabaseTools
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(
-                new DbOperationResult(success: false, error: ex.Message), JsonOptions.Default);
+                new DbOperationResult(success: false, error: ErrorSanitizer.Sanitize(ex, _logger)), JsonOptions.Default);
         }
     }
 
@@ -434,7 +480,7 @@ public class DatabaseTools
         ReadOnly = false,
         Destructive = true)]
     [Description("Drops a table from the SQL Server database. Expects a valid DROP TABLE SQL statement.")]
-    public static async Task<string> DropTable(
+    public async Task<string> DropTable(
         [Description("DROP TABLE SQL statement")] string sql,
         [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
@@ -445,6 +491,13 @@ public class DatabaseTools
                 JsonOptions.Default);
         }
 
+        var (isValid, validationError) = SqlInputValidator.ValidateStatement(sql, "DROP TABLE");
+        if (!isValid)
+        {
+            return JsonSerializer.Serialize(
+                new DbOperationResult(success: false, error: validationError), JsonOptions.Default);
+        }
+
         try
         {
             connectionString = ConnectionStringResolver.Resolve(connectionString);
@@ -452,6 +505,7 @@ public class DatabaseTools
             await conn.OpenAsync();
 
             await using var cmd = new SqlCommand(sql, conn);
+            cmd.CommandTimeout = DefaultCommandTimeoutSeconds;
             await cmd.ExecuteNonQueryAsync();
 
             return JsonSerializer.Serialize(
@@ -460,7 +514,7 @@ public class DatabaseTools
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(
-                new DbOperationResult(success: false, error: ex.Message), JsonOptions.Default);
+                new DbOperationResult(success: false, error: ErrorSanitizer.Sanitize(ex, _logger)), JsonOptions.Default);
         }
     }
 }

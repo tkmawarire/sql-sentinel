@@ -1,0 +1,44 @@
+name: Security - Dependency Vulnerability Scan
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.csproj'
+      - '**/Directory.Build.props'
+      - '.github/workflows/security.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.csproj'
+      - '**/Directory.Build.props'
+  schedule:
+    - cron: '0 8 * * 1' # Weekly on Monday at 08:00 UTC
+
+jobs:
+  vulnerability-scan:
+    name: Check for vulnerable packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore packages
+        run: dotnet restore
+
+      - name: Check for vulnerable packages
+        run: |
+          echo "## Vulnerability Scan Results" >> "$GITHUB_STEP_SUMMARY"
+          if dotnet list package --vulnerable --include-transitive 2>&1 | tee /tmp/vuln-report.txt | grep -q "has the following vulnerable packages"; then
+            echo "### Vulnerable packages found:" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/vuln-report.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          else
+            echo "No known vulnerabilities found." >> "$GITHUB_STEP_SUMMARY"
+          fi

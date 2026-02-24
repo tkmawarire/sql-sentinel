@@ -4,6 +4,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using SqlServer.Profiler.Mcp.Models;
 using SqlServer.Profiler.Mcp.Services;
+using Microsoft.Extensions.Logging;
 using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
@@ -18,17 +19,20 @@ public class DiagnosticTools
     private readonly IWaitStatsService _waitStatsService;
     private readonly SessionConfigStore _configStore;
     private readonly IMemoryService _memoryService;
+    private readonly ILogger<DiagnosticTools> _logger;
 
     public DiagnosticTools(
         IProfilerService profilerService,
         IWaitStatsService waitStatsService,
         SessionConfigStore configStore,
-        IMemoryService memoryService)
+        IMemoryService memoryService,
+        ILogger<DiagnosticTools> logger)
     {
         _profilerService = profilerService;
         _waitStatsService = waitStatsService;
         _configStore = configStore;
         _memoryService = memoryService;
+        _logger = logger;
     }
 
     [McpServerTool(Name = "sqlsentinel_get_deadlocks")]
@@ -89,7 +93,7 @@ public class DiagnosticTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message,
+                error = ErrorSanitizer.Sanitize(ex, _logger),
                 suggestion = "Ensure session exists and includes Deadlock event type."
             }, JsonOptions.Default);
         }
@@ -160,7 +164,7 @@ public class DiagnosticTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }
@@ -210,7 +214,7 @@ public class DiagnosticTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }
@@ -420,7 +424,7 @@ public class DiagnosticTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = ex.Message
+                error = ErrorSanitizer.Sanitize(ex, _logger)
             }, JsonOptions.Default);
         }
     }

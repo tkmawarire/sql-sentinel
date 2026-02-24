@@ -4,6 +4,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using SqlServer.Profiler.Mcp.Models;
 using SqlServer.Profiler.Mcp.Services;
+using Microsoft.Extensions.Logging;
 using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
@@ -16,10 +17,12 @@ namespace SqlServer.Profiler.Mcp.Tools;
 public class MemoryTools
 {
     private readonly IMemoryService _memoryService;
+    private readonly ILogger<MemoryTools> _logger;
 
-    public MemoryTools(IMemoryService memoryService)
+    public MemoryTools(IMemoryService memoryService, ILogger<MemoryTools> logger)
     {
         _memoryService = memoryService;
+        _logger = logger;
     }
 
     [McpServerTool(Name = "sqlsentinel_memory_list")]
@@ -66,7 +69,7 @@ public class MemoryTools
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { success = false, error = ex.Message }, JsonOptions.Default);
+            return JsonSerializer.Serialize(new { success = false, error = ErrorSanitizer.Sanitize(ex, _logger) }, JsonOptions.Default);
         }
     }
 
@@ -104,7 +107,7 @@ public class MemoryTools
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { success = false, error = ex.Message }, JsonOptions.Default);
+            return JsonSerializer.Serialize(new { success = false, error = ErrorSanitizer.Sanitize(ex, _logger) }, JsonOptions.Default);
         }
     }
 
@@ -146,7 +149,7 @@ public class MemoryTools
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { success = false, error = ex.Message }, JsonOptions.Default);
+            return JsonSerializer.Serialize(new { success = false, error = ErrorSanitizer.Sanitize(ex, _logger) }, JsonOptions.Default);
         }
     }
 
@@ -194,7 +197,7 @@ public class MemoryTools
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { success = false, error = ex.Message }, JsonOptions.Default);
+            return JsonSerializer.Serialize(new { success = false, error = ErrorSanitizer.Sanitize(ex, _logger) }, JsonOptions.Default);
         }
     }
 
@@ -242,7 +245,7 @@ public class MemoryTools
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { success = false, error = ex.Message }, JsonOptions.Default);
+            return JsonSerializer.Serialize(new { success = false, error = ErrorSanitizer.Sanitize(ex, _logger) }, JsonOptions.Default);
         }
     }
 
@@ -266,7 +269,7 @@ public class MemoryTools
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { success = false, error = ex.Message }, JsonOptions.Default);
+            return JsonSerializer.Serialize(new { success = false, error = ErrorSanitizer.Sanitize(ex, _logger) }, JsonOptions.Default);
         }
     }
 
@@ -292,7 +295,7 @@ public class MemoryTools
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { success = false, error = ex.Message }, JsonOptions.Default);
+            return JsonSerializer.Serialize(new { success = false, error = ErrorSanitizer.Sanitize(ex, _logger) }, JsonOptions.Default);
         }
     }
 
