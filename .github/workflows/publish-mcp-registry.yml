@@ -118,6 +118,10 @@ jobs:
           tar xf mcp-publisher.tar.gz
           chmod +x mcp-publisher
 
+      - name: Authenticate with MCP Registry
+        run: |
+          ./mcp-publisher login github
+
       - name: Publish to MCP Registry (GitHub OIDC)
         run: |
           ./mcp-publisher publish .mcp/server.json
