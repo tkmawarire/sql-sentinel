@@ -28,10 +28,11 @@ public class DatabaseTools
         Destructive = false)]
     [Description("Lists all user tables in the SQL Server database. Returns schema-qualified table names (e.g., 'dbo.Users').")]
     public static async Task<string> ListTables(
-        [Description("SQL Server connection string")] string connectionString)
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
@@ -61,8 +62,8 @@ public class DatabaseTools
         Destructive = false)]
     [Description("Returns detailed schema information for a table including columns, indexes, constraints, and foreign keys.")]
     public static async Task<string> DescribeTable(
-        [Description("SQL Server connection string")] string connectionString,
-        [Description("Table name, optionally schema-qualified (e.g., 'dbo.Users' or 'Users')")] string name)
+        [Description("Table name, optionally schema-qualified (e.g., 'dbo.Users' or 'Users')")] string name,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
         string? schema = null;
         if (name.Contains('.'))
@@ -149,6 +150,7 @@ public class DatabaseTools
 
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
@@ -281,8 +283,8 @@ public class DatabaseTools
         Destructive = false)]
     [Description("Creates a new table in the SQL Server database. Expects a valid CREATE TABLE SQL statement.")]
     public static async Task<string> CreateTable(
-        [Description("SQL Server connection string")] string connectionString,
-        [Description("CREATE TABLE SQL statement")] string sql)
+        [Description("CREATE TABLE SQL statement")] string sql,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
         if (!SqlInputValidator.StartsWithKeyword(sql, "CREATE"))
         {
@@ -293,6 +295,7 @@ public class DatabaseTools
 
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
@@ -315,8 +318,8 @@ public class DatabaseTools
         Destructive = false)]
     [Description("Inserts data into a table. Expects a valid INSERT SQL statement.")]
     public static async Task<string> InsertData(
-        [Description("SQL Server connection string")] string connectionString,
-        [Description("INSERT SQL statement")] string sql)
+        [Description("INSERT SQL statement")] string sql,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
         if (!SqlInputValidator.StartsWithKeyword(sql, "INSERT"))
         {
@@ -327,6 +330,7 @@ public class DatabaseTools
 
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
@@ -350,8 +354,8 @@ public class DatabaseTools
         Destructive = false)]
     [Description("Executes a SELECT query against the SQL Server database and returns the results.")]
     public static async Task<string> ReadData(
-        [Description("SQL Server connection string")] string connectionString,
-        [Description("SELECT SQL query to execute")] string sql)
+        [Description("SELECT SQL query to execute")] string sql,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
         if (!SqlInputValidator.StartsWithKeyword(sql, "SELECT", "WITH"))
         {
@@ -362,6 +366,7 @@ public class DatabaseTools
 
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
@@ -395,8 +400,8 @@ public class DatabaseTools
         Destructive = true)]
     [Description("Updates data in a table. Expects a valid UPDATE SQL statement.")]
     public static async Task<string> UpdateData(
-        [Description("SQL Server connection string")] string connectionString,
-        [Description("UPDATE SQL statement")] string sql)
+        [Description("UPDATE SQL statement")] string sql,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
         if (!SqlInputValidator.StartsWithKeyword(sql, "UPDATE"))
         {
@@ -407,6 +412,7 @@ public class DatabaseTools
 
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
@@ -429,8 +435,8 @@ public class DatabaseTools
         Destructive = true)]
     [Description("Drops a table from the SQL Server database. Expects a valid DROP TABLE SQL statement.")]
     public static async Task<string> DropTable(
-        [Description("SQL Server connection string")] string connectionString,
-        [Description("DROP TABLE SQL statement")] string sql)
+        [Description("DROP TABLE SQL statement")] string sql,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
     {
         if (!SqlInputValidator.StartsWithKeyword(sql, "DROP"))
         {
@@ -441,6 +447,7 @@ public class DatabaseTools
 
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 

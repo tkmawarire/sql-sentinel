@@ -4,6 +4,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using SqlServer.Profiler.Mcp.Models;
 using SqlServer.Profiler.Mcp.Services;
+using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
 
@@ -40,11 +41,12 @@ public class DiagnosticTools
         """)]
     public async Task<string> GetDeadlocks(
         [Description("Name of the profiling session")] string sessionName,
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Output format: Json or Markdown")] string responseFormat = "Markdown")
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var deadlocks = await _profilerService.GetDeadlocksAsync(connectionString, sessionName);
 
             if (deadlocks.Count == 0)
@@ -106,11 +108,12 @@ public class DiagnosticTools
         """)]
     public async Task<string> GetBlocking(
         [Description("Name of the profiling session")] string sessionName,
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Output format: Json or Markdown")] string responseFormat = "Markdown")
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var blockingEvents = await _profilerService.GetBlockingEventsAsync(connectionString, sessionName);
 
             if (blockingEvents.Count == 0)
@@ -174,12 +177,13 @@ public class DiagnosticTools
         Common benign waits (SLEEP_*, BROKER_*, background tasks) are excluded.
         """)]
     public async Task<string> GetWaitStats(
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Number of top wait types to return")] int topN = 20,
         [Description("Output format: Json or Markdown")] string responseFormat = "Markdown")
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var waitStats = await _waitStatsService.GetWaitStatsAsync(connectionString, topN);
 
             if (waitStats.Count == 0)
@@ -227,13 +231,14 @@ public class DiagnosticTools
         Pass empty string to skip query analysis and only return live DMV data.
         """)]
     public async Task<string> HealthCheck(
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Profiling session to analyze (empty string to skip)")] string sessionName = "",
         [Description("Threshold for slow query flagging in ms")] int slowQueryThresholdMs = 1000,
         [Description("Output format: Json or Markdown")] string responseFormat = "Markdown")
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var insights = new List<HealthInsight>();
             var result = new HealthCheckResult();
 

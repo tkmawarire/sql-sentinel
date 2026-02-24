@@ -4,6 +4,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using SqlServer.Profiler.Mcp.Models;
 using SqlServer.Profiler.Mcp.Services;
+using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
 
@@ -118,12 +119,13 @@ public class MemoryTools
         Get query fingerprints from get_events, get_stats, or memory_search_queries.
         """)]
     public async Task<string> QueryHistory(
-        [Description("SQL Server connection string (used to identify the server)")] string connectionString,
         [Description("Query fingerprint (SHA256 prefix from profiling results)")] string queryFingerprint,
+        [Description("SQL Server connection string (used to identify the server). Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Output format: Json or Markdown")] string responseFormat = "Markdown")
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var serverName = MemoryService.ExtractServerName(connectionString);
             var history = await _memoryService.GetQueryHistoryAsync(serverName, queryFingerprint);
 
@@ -159,7 +161,7 @@ public class MemoryTools
         Results are sorted by total duration (heaviest queries first).
         """)]
     public async Task<string> SearchQueries(
-        [Description("SQL Server connection string (used to identify the server)")] string connectionString,
+        [Description("SQL Server connection string (used to identify the server). Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Search for queries containing this text (e.g., table name, stored procedure)")] string? sqlContains = null,
         [Description("Filter to queries that ran in this database")] string? database = null,
         [Description("Minimum total executions across all captures")] int? minExecutions = null,
@@ -169,6 +171,7 @@ public class MemoryTools
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var serverName = MemoryService.ExtractServerName(connectionString);
             long? minAvgUs = minAvgDurationMs.HasValue ? minAvgDurationMs.Value * 1000L : null;
 

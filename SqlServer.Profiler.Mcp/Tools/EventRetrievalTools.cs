@@ -4,6 +4,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using SqlServer.Profiler.Mcp.Models;
 using SqlServer.Profiler.Mcp.Services;
+using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Tools;
 
@@ -47,7 +48,7 @@ public class EventRetrievalTools
         """)]
     public async Task<string> GetEvents(
         [Description("Name of the profiling session")] string sessionName,
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Filter events after this time (ISO format: '2024-01-15T10:30:00')")] string? startTime = null,
         [Description("Filter events before this time (ISO format)")] string? endTime = null,
         [Description("Filter to specific database")] string? database = null,
@@ -64,6 +65,7 @@ public class EventRetrievalTools
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var config = _configStore.Get(sessionName);
             var excludePatterns = config?.ExcludePatterns ?? NoisePatterns.Default;
 
@@ -146,7 +148,7 @@ public class EventRetrievalTools
         """)]
     public async Task<string> GetStats(
         [Description("Name of the profiling session")] string sessionName,
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Analysis window start (ISO format)")] string? startTime = null,
         [Description("Analysis window end (ISO format)")] string? endTime = null,
         [Description("Group by: QueryFingerprint, Database, Application, Login, or None")] string groupBy = "QueryFingerprint",
@@ -157,6 +159,7 @@ public class EventRetrievalTools
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var config = _configStore.Get(sessionName);
             var excludePatterns = config?.ExcludePatterns ?? NoisePatterns.Default;
 
@@ -329,7 +332,7 @@ public class EventRetrievalTools
         """)]
     public async Task<string> AnalyzeSequence(
         [Description("Name of the profiling session")] string sessionName,
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Analysis window start (ISO format)")] string? startTime = null,
         [Description("Analysis window end (ISO format)")] string? endTime = null,
         [Description("Text to search for in queries (e.g., order ID, request ID)")] string? correlationId = null,
@@ -338,6 +341,7 @@ public class EventRetrievalTools
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var config = _configStore.Get(sessionName);
             var excludePatterns = config?.ExcludePatterns ?? NoisePatterns.Default;
 
@@ -458,11 +462,12 @@ public class EventRetrievalTools
         Useful for understanding what's connected to the server and for identifying active blocking chains.
         """)]
     public async Task<string> GetConnectionInfo(
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("What to retrieve: databases, applications, logins, sessions, blocking, or all")] string infoType = "all")
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             var result = await _profilerService.GetConnectionInfoAsync(connectionString, infoType.ToLowerInvariant());
             return JsonSerializer.Serialize(result, JsonOptions.Default);
         }
@@ -656,7 +661,7 @@ public class EventRetrievalTools
         """)]
     public async Task<string> StreamEvents(
         [Description("Name of the profiling session (must be running)")] string sessionName,
-        [Description("SQL Server connection string")] string connectionString,
+        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("How long to capture events in seconds (1-300). Default 30.")] int durationSeconds = 30,
         [Description("Filter to specific database")] string? database = null,
         [Description("Filter to specific application")] string? application = null,
@@ -666,6 +671,7 @@ public class EventRetrievalTools
     {
         try
         {
+            connectionString = ConnectionStringResolver.Resolve(connectionString);
             durationSeconds = Math.Clamp(durationSeconds, 1, 300);
 
             var filters = new EventFilters
