@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SQL Sentinel MCP Server (v2.0.0) - a .NET 9 MCP (Model Context Protocol) server for SQL Server monitoring, diagnostics, and database operations using Extended Events and DMVs. Provides query profiling, deadlock detection, blocking analysis, wait stats, intelligent diagnostics, and CRUD database tools. Uses Microsoft.Data.SqlClient for native SQL Server connectivity (no ODBC drivers required).
+SQL Sentinel MCP Server (v2.3.0) - a .NET 9 MCP (Model Context Protocol) server for SQL Server monitoring, diagnostics, and database operations using Extended Events and DMVs. Provides query profiling, deadlock detection, blocking analysis, wait stats, intelligent diagnostics, and CRUD database tools. Uses Microsoft.Data.SqlClient for native SQL Server connectivity (no ODBC drivers required).
 
 ## Build Commands
 

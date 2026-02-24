@@ -62,12 +62,9 @@ public class SessionManagementTools
         
         The session is created but NOT started. Use sqlsentinel_start_session to begin capture.
         
-        Connection string format: "Server=localhost;Database=master;User Id=sa;Password=xxx;TrustServerCertificate=true"
-        Or for Windows auth: "Server=localhost;Database=master;Integrated Security=true;TrustServerCertificate=true"
         """)]
     public async Task<string> CreateSession(
         [Description("Unique name for this session (alphanumeric + underscore, e.g. 'debug_checkout')")] string sessionName,
-        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Filter to specific database names (comma-separated). Empty = all databases.")] string? databases = null,
         [Description("Filter to specific application names from connection string (comma-separated). Empty = all apps.")] string? applications = null,
         [Description("Filter to specific SQL logins (comma-separated). Empty = all users.")] string? logins = null,
@@ -80,7 +77,7 @@ public class SessionManagementTools
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             var allExcludePatterns = excludeNoise ? new List<string>(NoisePatterns.Default) : [];
             if (!string.IsNullOrWhiteSpace(excludePatterns))
             {
@@ -135,12 +132,11 @@ public class SessionManagementTools
     [McpServerTool(Name = "sqlsentinel_start_session")]
     [Description("Start capturing events for an existing profiling session. The session must have been created first with sqlsentinel_create_session.")]
     public async Task<string> StartSession(
-        [Description("Name of the profiling session")] string sessionName,
-        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
+        [Description("Name of the profiling session")] string sessionName)
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             var result = await _profilerService.StartSessionAsync(connectionString, sessionName);
             return JsonSerializer.Serialize(result, JsonOptions.Default);
         }
@@ -161,12 +157,11 @@ public class SessionManagementTools
     [McpServerTool(Name = "sqlsentinel_stop_session")]
     [Description("Stop capturing events for a profiling session. Events captured so far are retained. Use sqlsentinel_drop_session to completely remove the session.")]
     public async Task<string> StopSession(
-        [Description("Name of the profiling session")] string sessionName,
-        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
+        [Description("Name of the profiling session")] string sessionName)
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             var result = await _profilerService.StopSessionAsync(connectionString, sessionName);
             return JsonSerializer.Serialize(result, JsonOptions.Default);
         }
@@ -186,12 +181,11 @@ public class SessionManagementTools
     [McpServerTool(Name = "sqlsentinel_drop_session")]
     [Description("Drop a profiling session and discard all captured events. WARNING: This permanently deletes all captured events. Retrieve any needed data with sqlsentinel_get_events before dropping.")]
     public async Task<string> DropSession(
-        [Description("Name of the profiling session")] string sessionName,
-        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
+        [Description("Name of the profiling session")] string sessionName)
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             var result = await _profilerService.DropSessionAsync(connectionString, sessionName);
             _configStore.Remove(sessionName);
             return JsonSerializer.Serialize(result, JsonOptions.Default);
@@ -211,12 +205,11 @@ public class SessionManagementTools
     /// </summary>
     [McpServerTool(Name = "sqlsentinel_list_sessions")]
     [Description("List all profiling sessions created by this MCP server. Shows session name, state (RUNNING/STOPPED), and buffer usage.")]
-    public async Task<string> ListSessions(
-        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
+    public async Task<string> ListSessions()
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             var sessions = await _profilerService.ListSessionsAsync(connectionString);
             return JsonSerializer.Serialize(new
             {
@@ -242,7 +235,6 @@ public class SessionManagementTools
     [Description("Create AND start a profiling session in one step. Convenience tool for rapid debugging. Creates a session with specified filters and immediately begins capture.")]
     public async Task<string> QuickCapture(
         [Description("Unique name for this session")] string sessionName,
-        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Filter to specific database names (comma-separated)")] string? databases = null,
         [Description("Filter to specific application names (comma-separated)")] string? applications = null,
         [Description("Filter to specific SQL logins (comma-separated)")] string? logins = null,
@@ -253,7 +245,7 @@ public class SessionManagementTools
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             var allExcludePatterns = excludeNoise ? new List<string>(NoisePatterns.Default) : [];
             var parsedEventTypes = ParseEventTypes(eventTypes);
 

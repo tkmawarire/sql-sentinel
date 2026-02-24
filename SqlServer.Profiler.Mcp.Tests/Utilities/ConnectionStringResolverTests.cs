@@ -22,54 +22,33 @@ public class ConnectionStringResolverTests : IDisposable
     }
 
     [Fact]
-    public void Resolve_WithExplicitConnectionString_ReturnsIt()
-    {
-        var connStr = "Server=localhost;Database=test;Integrated Security=true";
-        var result = ConnectionStringResolver.Resolve(connStr);
-        Assert.Equal(connStr, result);
-    }
-
-    [Fact]
-    public void Resolve_WithNullExplicit_FallsBackToEnvVar()
+    public void Resolve_WithEnvVar_ReturnsIt()
     {
         var envConnStr = "Server=envhost;Database=envdb;Integrated Security=true";
         Environment.SetEnvironmentVariable(EnvVar, envConnStr);
 
-        var result = ConnectionStringResolver.Resolve(null);
+        var result = ConnectionStringResolver.Resolve();
         Assert.Equal(envConnStr, result);
     }
 
     [Fact]
-    public void Resolve_WithEmptyExplicit_FallsBackToEnvVar()
+    public void Resolve_WithNoEnvVar_ThrowsArgumentException()
     {
-        var envConnStr = "Server=envhost;Database=envdb;Integrated Security=true";
-        Environment.SetEnvironmentVariable(EnvVar, envConnStr);
-
-        var result = ConnectionStringResolver.Resolve("");
-        Assert.Equal(envConnStr, result);
-    }
-
-    [Fact]
-    public void Resolve_WithWhitespaceExplicit_FallsBackToEnvVar()
-    {
-        var envConnStr = "Server=envhost;Database=envdb;Integrated Security=true";
-        Environment.SetEnvironmentVariable(EnvVar, envConnStr);
-
-        var result = ConnectionStringResolver.Resolve("   ");
-        Assert.Equal(envConnStr, result);
-    }
-
-    [Fact]
-    public void Resolve_WithNoExplicitAndNoEnvVar_ThrowsArgumentException()
-    {
-        var ex = Assert.Throws<ArgumentException>(() => ConnectionStringResolver.Resolve(null));
+        var ex = Assert.Throws<ArgumentException>(() => ConnectionStringResolver.Resolve());
         Assert.Contains("SQL_SENTINEL_CONNECTION_STRING", ex.Message);
     }
 
     [Fact]
-    public void Resolve_WithEmptyExplicitAndEmptyEnvVar_ThrowsArgumentException()
+    public void Resolve_WithEmptyEnvVar_ThrowsArgumentException()
     {
         Environment.SetEnvironmentVariable(EnvVar, "");
-        Assert.Throws<ArgumentException>(() => ConnectionStringResolver.Resolve(""));
+        Assert.Throws<ArgumentException>(() => ConnectionStringResolver.Resolve());
+    }
+
+    [Fact]
+    public void Resolve_WithWhitespaceEnvVar_ThrowsArgumentException()
+    {
+        Environment.SetEnvironmentVariable(EnvVar, "   ");
+        Assert.Throws<ArgumentException>(() => ConnectionStringResolver.Resolve());
     }
 }

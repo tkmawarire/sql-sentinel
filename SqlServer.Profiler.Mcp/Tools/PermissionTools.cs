@@ -36,12 +36,11 @@ public class PermissionTools
 
         Returns the current permission status and provides GRANT statements if permissions are missing.
         """)]
-    public async Task<string> CheckPermissions(
-        [Description("SQL Server connection string. Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
+    public async Task<string> CheckPermissions()
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
@@ -153,12 +152,11 @@ public class PermissionTools
         - VIEW SERVER STATE: Read from ring buffer targets and DMVs
         """)]
     public async Task<string> GrantPermissions(
-        [Description("The SQL Server login to grant permissions to (e.g., 'app_user' or 'DOMAIN\\\\Username')")] string targetLogin,
-        [Description("SQL Server connection string (must use a login with sysadmin or CONTROL SERVER). Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null)
+        [Description("The SQL Server login to grant permissions to (e.g., 'app_user' or 'DOMAIN\\\\Username')")] string targetLogin)
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
 
             // Validate login name format (basic SQL injection prevention)
             if (!SqlInputValidator.IsValidLoginName(targetLogin))

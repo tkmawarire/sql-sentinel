@@ -22,21 +22,10 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     // ── Session Endpoints ───────────────────────────
 
     [Fact]
-    public async Task ListSessions_WithConnectionString_Returns200()
+    public async Task ListSessions_Returns200()
     {
-        // The tool will try to connect to SQL Server and fail, but the global error handler
-        // should return 500 with sanitized error
-        var response = await _client.GetAsync("/api/sessions?connectionString=Server=fake;Database=test;");
-        // Either 200 (if tool handles error) or 500 (global handler)
-        Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
-    }
-
-    [Fact]
-    public async Task ListSessions_NoConnectionString_FallsBackToConfig()
-    {
-        // No explicit connection string, but appsettings.json has one configured
-        // so the controller resolves it from config and returns 200
         var response = await _client.GetAsync("/api/sessions");
+        // Either 200 (if tool handles error) or 500 (global handler)
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -45,8 +34,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     {
         var request = new
         {
-            SessionName = "test-session",
-            ConnectionString = "Server=fake;Database=test;"
+            SessionName = "test-session"
         };
         var json = JsonSerializer.Serialize(request);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -60,7 +48,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task StartSession_RoutesCorrectly()
     {
         var response = await _client.PostAsync(
-            "/api/sessions/test/start?connectionString=Server=fake;Database=test;",
+            "/api/sessions/test/start",
             null);
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
@@ -69,7 +57,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task StopSession_RoutesCorrectly()
     {
         var response = await _client.PostAsync(
-            "/api/sessions/test/stop?connectionString=Server=fake;Database=test;",
+            "/api/sessions/test/stop",
             null);
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
@@ -78,7 +66,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task DropSession_RoutesCorrectly()
     {
         var response = await _client.DeleteAsync(
-            "/api/sessions/test?connectionString=Server=fake;Database=test;");
+            "/api/sessions/test");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -87,8 +75,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     {
         var request = new
         {
-            SessionName = "quick-test",
-            ConnectionString = "Server=fake;Database=test;"
+            SessionName = "quick-test"
         };
         var json = JsonSerializer.Serialize(request);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -103,7 +90,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task GetEvents_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/sessions/test/events?connectionString=Server=fake;Database=test;");
+            "/api/sessions/test/events");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -111,7 +98,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task GetStats_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/sessions/test/stats?connectionString=Server=fake;Database=test;");
+            "/api/sessions/test/stats");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -119,7 +106,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task AnalyzeSequence_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/sessions/test/sequence?connectionString=Server=fake;Database=test;");
+            "/api/sessions/test/sequence");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -129,7 +116,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task GetConnectionInfo_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/connection-info?connectionString=Server=fake;Database=test;");
+            "/api/connection-info");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -139,7 +126,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task CheckPermissions_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/permissions/check?connectionString=Server=fake;Database=test;");
+            "/api/permissions/check");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -148,7 +135,6 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     {
         var request = new
         {
-            ConnectionString = "Server=fake;Database=test;",
             TargetLogin = "test_user"
         };
         var json = JsonSerializer.Serialize(request);
@@ -164,7 +150,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task GetDeadlocks_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/sessions/test/deadlocks?connectionString=Server=fake;Database=test;");
+            "/api/sessions/test/deadlocks");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -172,7 +158,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task GetBlocking_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/sessions/test/blocking?connectionString=Server=fake;Database=test;");
+            "/api/sessions/test/blocking");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -180,7 +166,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task GetWaitStats_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/wait-stats?connectionString=Server=fake;Database=test;");
+            "/api/wait-stats");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -188,7 +174,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task HealthCheck_RoutesCorrectly()
     {
         var response = await _client.GetAsync(
-            "/api/health?connectionString=Server=fake;Database=test;");
+            "/api/health");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.InternalServerError);
     }
 
@@ -239,7 +225,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
         // Tool classes have their own try/catch, so errors from fake SQL connections
         // are returned as 200 with error JSON, not 500
         var response = await _client.GetAsync(
-            "/api/sessions/nonexistent/events?connectionString=Server=fake;Database=test;");
+            "/api/sessions/nonexistent/events");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
@@ -251,7 +237,7 @@ public class ProfilerControllerTests : IClassFixture<CustomWebApplicationFactory
     public async Task ToolErrorHandling_ResponseIsValidJson()
     {
         var response = await _client.GetAsync(
-            "/api/sessions/nonexistent/stats?connectionString=Server=fake;Database=test;");
+            "/api/sessions/nonexistent/stats");
 
         var content = await response.Content.ReadAsStringAsync();
         // Verify the error response is valid JSON

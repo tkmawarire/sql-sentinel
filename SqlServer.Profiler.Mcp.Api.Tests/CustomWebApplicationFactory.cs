@@ -16,6 +16,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<global::Program
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // Set env var so tools can resolve a connection string
+        Environment.SetEnvironmentVariable("SQL_SENTINEL_CONNECTION_STRING", "Server=fake;Database=test;");
+
         builder.UseEnvironment("Development");
 
         builder.ConfigureServices(services =>

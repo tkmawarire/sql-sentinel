@@ -75,7 +75,7 @@ claude mcp add sql-sentinel \
 
 > **Network access**: The `-i` flag is required for stdio transport. Use `--network host` so the container can reach SQL Server on your host machine. For remote SQL Server, omit `--network host` and use the accessible hostname in your connection string.
 >
-> **Connection string**: Set `SQL_SENTINEL_CONNECTION_STRING` via `-e` so you don't need to pass it on every tool call. You can still override it per-call by passing the `connectionString` parameter explicitly.
+> **Connection string**: Set `SQL_SENTINEL_CONNECTION_STRING` via `-e`. All tools read the connection string from this environment variable.
 
 ### Option 2: .NET Global Tool (NuGet)
 
@@ -132,7 +132,7 @@ Output will be in `bin/Release/net9.0/{runtime}/publish/`
 
 ## Connection Strings
 
-Every tool accepts a `connectionString` parameter. If omitted, the server falls back to the `SQL_SENTINEL_CONNECTION_STRING` environment variable. Set it once to avoid passing the connection string on every call:
+All tools read the connection string from the `SQL_SENTINEL_CONNECTION_STRING` environment variable. Set it once before starting the server:
 
 ```bash
 export SQL_SENTINEL_CONNECTION_STRING="Server=localhost;Database=master;User Id=sa;Password=YourPassword;TrustServerCertificate=false;Encrypt=true"
@@ -214,7 +214,6 @@ Server=yourserver.database.windows.net;Database=yourdb;User Id=user;Password=pas
 ```
 Agent: sqlsentinel_quick_capture(
     sessionName: "debug_api",
-    connectionString: "Server=localhost;Database=master;Integrated Security=true;TrustServerCertificate=false;Encrypt=true",
     applications: "MyWebApp",
     minDurationMs: 100
 )
@@ -227,7 +226,7 @@ Agent: sqlsentinel_get_events(
     limit: 20
 )
 
-Agent: sqlsentinel_drop_session(sessionName: "debug_api", ...)
+Agent: sqlsentinel_drop_session(sessionName: "debug_api")
 ```
 
 ### Find N+1 Queries
@@ -263,7 +262,6 @@ Agent: sqlsentinel_analyze_sequence(
 ```
 Agent: sqlsentinel_quick_capture(
     sessionName: "deadlock_monitor",
-    connectionString: "...",
     eventTypes: "Deadlock"
 )
 
@@ -280,7 +278,6 @@ Agent: sqlsentinel_get_deadlocks(
 ```
 Agent: sqlsentinel_quick_capture(
     sessionName: "blocking_check",
-    connectionString: "...",
     eventTypes: "BlockedProcess"
 )
 
@@ -296,7 +293,6 @@ Agent: sqlsentinel_get_blocking(
 
 ```
 Agent: sqlsentinel_health_check(
-    connectionString: "...",
     sessionName: "my_session",
     slowQueryThresholdMs: 1000,
     responseFormat: "Markdown"
@@ -306,17 +302,13 @@ Agent: sqlsentinel_health_check(
 ### Database Operations
 
 ```
-Agent: sqlsentinel_list_tables(
-    connectionString: "Server=localhost;Database=AdventureWorks;Integrated Security=true;TrustServerCertificate=false;Encrypt=true"
-)
+Agent: sqlsentinel_list_tables()
 
 Agent: sqlsentinel_describe_table(
-    connectionString: "...",
     name: "dbo.Products"
 )
 
 Agent: sqlsentinel_read_data(
-    connectionString: "...",
     sql: "SELECT TOP 10 * FROM dbo.Products ORDER BY CreatedDate DESC"
 )
 ```
@@ -325,7 +317,6 @@ Agent: sqlsentinel_read_data(
 
 ```
 Agent: sqlsentinel_get_wait_stats(
-    connectionString: "...",
     topN: 20,
     responseFormat: "Markdown"
 )
@@ -444,9 +435,7 @@ dotnet run --project SqlServer.Profiler.Mcp.Api/
 ```
 
 - Swagger UI: `http://localhost:5100/`
-- All endpoints accept a `connectionString` query parameter, or you can configure it via:
-  - `appsettings.json` → `SqlSentinel:ConnectionString`
-  - Environment variable → `SQL_SENTINEL_CONNECTION_STRING`
+- Configure the connection string via environment variable `SQL_SENTINEL_CONNECTION_STRING`
 
 ### Using the Debug CLI
 
@@ -463,10 +452,10 @@ dotnet run --project SqlServer.Profiler.Mcp.Cli/ list
 dotnet run --project SqlServer.Profiler.Mcp.Cli/ help sqlsentinel_quick_capture
 
 # Execute a single tool
-dotnet run --project SqlServer.Profiler.Mcp.Cli/ call sqlsentinel_list_sessions --connection-string "Server=localhost;..."
+dotnet run --project SqlServer.Profiler.Mcp.Cli/ call sqlsentinel_list_sessions
 ```
 
-Set the `SQL_SENTINEL_CONNECTION_STRING` environment variable to avoid passing it on every call.
+Set the `SQL_SENTINEL_CONNECTION_STRING` environment variable before running.
 
 ### Docker Build
 
@@ -498,9 +487,9 @@ docker run -i --rm --network host sql-sentinel-mcp:test
 [Description("Description shown to AI agents")]
 public static async Task<string> Example(
     IProfilerService profilerService,
-    [Description("SQL Server connection string")] string connectionString,
     [Description("Optional filter")] string? filter = null)
 {
+    var connectionString = ConnectionStringResolver.Resolve();
     // Implementation
     return JsonSerializer.Serialize(result);
 }
@@ -541,7 +530,7 @@ Large ring buffers with many events can be slow to parse. Use:
 
 ## Security Notes
 
-- Connection strings contain credentials — secure appropriately
+- The `SQL_SENTINEL_CONNECTION_STRING` environment variable contains credentials — secure appropriately
 - Don't leave sessions running indefinitely on production
 - Query text may contain sensitive data
 - Grant minimum required permissions

@@ -123,12 +123,11 @@ public class MemoryTools
         """)]
     public async Task<string> QueryHistory(
         [Description("Query fingerprint (SHA256 prefix from profiling results)")] string queryFingerprint,
-        [Description("SQL Server connection string (used to identify the server). Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Output format: Json or Markdown")] string responseFormat = "Markdown")
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             var serverName = MemoryService.ExtractServerName(connectionString);
             var history = await _memoryService.GetQueryHistoryAsync(serverName, queryFingerprint);
 
@@ -164,7 +163,6 @@ public class MemoryTools
         Results are sorted by total duration (heaviest queries first).
         """)]
     public async Task<string> SearchQueries(
-        [Description("SQL Server connection string (used to identify the server). Falls back to SQL_SENTINEL_CONNECTION_STRING env var if not provided.")] string? connectionString = null,
         [Description("Search for queries containing this text (e.g., table name, stored procedure)")] string? sqlContains = null,
         [Description("Filter to queries that ran in this database")] string? database = null,
         [Description("Minimum total executions across all captures")] int? minExecutions = null,
@@ -174,7 +172,7 @@ public class MemoryTools
     {
         try
         {
-            connectionString = ConnectionStringResolver.Resolve(connectionString);
+            var connectionString = ConnectionStringResolver.Resolve();
             var serverName = MemoryService.ExtractServerName(connectionString);
             long? minAvgUs = minAvgDurationMs.HasValue ? minAvgDurationMs.Value * 1000L : null;
 

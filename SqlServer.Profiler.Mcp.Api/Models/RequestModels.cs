@@ -15,11 +15,6 @@ public class CreateSessionRequest
     public required string SessionName { get; set; }
 
     /// <summary>
-    /// SQL Server connection string. If not provided, falls back to configured default.
-    /// </summary>
-    public string? ConnectionString { get; set; }
-
-    /// <summary>
     /// Filter to specific database names (comma-separated). Empty = all databases.
     /// </summary>
     public string? Databases { get; set; }
@@ -81,11 +76,6 @@ public class QuickCaptureRequest
     public required string SessionName { get; set; }
 
     /// <summary>
-    /// SQL Server connection string. If not provided, falls back to configured default.
-    /// </summary>
-    public string? ConnectionString { get; set; }
-
-    /// <summary>
     /// Filter to specific database names (comma-separated).
     /// </summary>
     public string? Databases { get; set; }
@@ -128,11 +118,6 @@ public class QuickCaptureRequest
 /// </summary>
 public class GrantPermissionsRequest
 {
-    /// <summary>
-    /// SQL Server connection string (must use a login with sysadmin or CONTROL SERVER). If not provided, falls back to configured default.
-    /// </summary>
-    public string? ConnectionString { get; set; }
-
     /// <summary>
     /// The SQL Server login to grant permissions to (e.g., 'app_user' or 'DOMAIN\Username').
     /// </summary>

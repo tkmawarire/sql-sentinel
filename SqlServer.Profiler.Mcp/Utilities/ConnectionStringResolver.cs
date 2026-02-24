@@ -1,7 +1,7 @@
 namespace SqlServer.Profiler.Mcp.Utilities;
 
 /// <summary>
-/// Resolves connection strings from explicit parameter or environment variable fallback.
+/// Resolves connection strings from the SQL_SENTINEL_CONNECTION_STRING environment variable.
 /// </summary>
 public static class ConnectionStringResolver
 {
@@ -9,18 +9,11 @@ public static class ConnectionStringResolver
     private static bool _trustCertWarningLogged;
 
     /// <summary>
-    /// Returns the connection string from the explicit parameter, or falls back to
-    /// the SQL_SENTINEL_CONNECTION_STRING environment variable.
-    /// Throws if neither is available.
+    /// Returns the connection string from the SQL_SENTINEL_CONNECTION_STRING environment variable.
+    /// Throws if the environment variable is not set.
     /// </summary>
-    public static string Resolve(string? connectionString)
+    public static string Resolve()
     {
-        if (!string.IsNullOrWhiteSpace(connectionString))
-        {
-            WarnIfTrustServerCertificate(connectionString);
-            return connectionString;
-        }
-
         var envValue = Environment.GetEnvironmentVariable(EnvVar);
         if (!string.IsNullOrWhiteSpace(envValue))
         {
@@ -29,7 +22,7 @@ public static class ConnectionStringResolver
         }
 
         throw new ArgumentException(
-            $"No connection string provided. Either pass the connectionString parameter or set the {EnvVar} environment variable.");
+            $"No connection string configured. Set the {EnvVar} environment variable.");
     }
 
     private static void WarnIfTrustServerCertificate(string connectionString)

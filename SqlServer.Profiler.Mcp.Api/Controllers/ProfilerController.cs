@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using SqlServer.Profiler.Mcp.Api.Models;
 using SqlServer.Profiler.Mcp.Services;
 using SqlServer.Profiler.Mcp.Tools;
+using SqlServer.Profiler.Mcp.Utilities;
 
 namespace SqlServer.Profiler.Mcp.Api.Controllers;
 
@@ -19,7 +20,6 @@ public class ProfilerController : ControllerBase
     private readonly DiagnosticTools _diagnosticTools;
     private readonly MemoryTools _memoryTools;
     private readonly IEventStreamingService _streamingService;
-    private readonly IConfiguration _configuration;
 
     public ProfilerController(
         SessionManagementTools sessionTools,
@@ -27,8 +27,7 @@ public class ProfilerController : ControllerBase
         PermissionTools permissionTools,
         DiagnosticTools diagnosticTools,
         MemoryTools memoryTools,
-        IEventStreamingService streamingService,
-        IConfiguration configuration)
+        IEventStreamingService streamingService)
     {
         _sessionTools = sessionTools;
         _eventTools = eventTools;
@@ -36,20 +35,6 @@ public class ProfilerController : ControllerBase
         _diagnosticTools = diagnosticTools;
         _memoryTools = memoryTools;
         _streamingService = streamingService;
-        _configuration = configuration;
-    }
-
-    private string ResolveConnectionString(string? connectionString)
-    {
-        if (!string.IsNullOrWhiteSpace(connectionString))
-            return connectionString;
-        var configured = _configuration["SqlSentinel:ConnectionString"];
-        if (!string.IsNullOrWhiteSpace(configured))
-            return configured;
-        var envVar = Environment.GetEnvironmentVariable("SQL_SENTINEL_CONNECTION_STRING");
-        if (!string.IsNullOrWhiteSpace(envVar))
-            return envVar;
-        throw new InvalidOperationException("No connection string provided. Pass connectionString parameter, set SqlSentinel:ConnectionString in config, or set SQL_SENTINEL_CONNECTION_STRING environment variable.");
     }
 
     private ContentResult JsonContent(string json)
@@ -69,10 +54,8 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> CreateSession([FromBody] CreateSessionRequest request)
     {
-        var connStr = ResolveConnectionString(request.ConnectionString);
         var result = await _sessionTools.CreateSession(
             request.SessionName,
-            connStr,
             request.Databases,
             request.Applications,
             request.Logins,
@@ -89,15 +72,12 @@ public class ProfilerController : ControllerBase
     /// Start capturing events for an existing profiling session.
     /// </summary>
     /// <param name="sessionName">Name of the profiling session.</param>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     [HttpPost("sessions/{sessionName}/start")]
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> StartSession(
-        [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null)
+        [FromRoute] string sessionName)
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _sessionTools.StartSession(sessionName, connStr);
+        var result = await _sessionTools.StartSession(sessionName);
         return JsonContent(result);
     }
 
@@ -105,15 +85,12 @@ public class ProfilerController : ControllerBase
     /// Stop capturing events for a profiling session. Events captured so far are retained.
     /// </summary>
     /// <param name="sessionName">Name of the profiling session.</param>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     [HttpPost("sessions/{sessionName}/stop")]
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> StopSession(
-        [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null)
+        [FromRoute] string sessionName)
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _sessionTools.StopSession(sessionName, connStr);
+        var result = await _sessionTools.StopSession(sessionName);
         return JsonContent(result);
     }
 
@@ -121,29 +98,23 @@ public class ProfilerController : ControllerBase
     /// Drop a profiling session and discard all captured events.
     /// </summary>
     /// <param name="sessionName">Name of the profiling session.</param>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     [HttpDelete("sessions/{sessionName}")]
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> DropSession(
-        [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null)
+        [FromRoute] string sessionName)
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _sessionTools.DropSession(sessionName, connStr);
+        var result = await _sessionTools.DropSession(sessionName);
         return JsonContent(result);
     }
 
     /// <summary>
     /// List all profiling sessions created by this MCP server.
     /// </summary>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     [HttpGet("sessions")]
     [ProducesResponseType(typeof(string), 200)]
-    public async Task<IActionResult> ListSessions(
-        [FromQuery] string? connectionString = null)
+    public async Task<IActionResult> ListSessions()
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _sessionTools.ListSessions(connStr);
+        var result = await _sessionTools.ListSessions();
         return JsonContent(result);
     }
 
@@ -154,10 +125,8 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> QuickCapture([FromBody] QuickCaptureRequest request)
     {
-        var connStr = ResolveConnectionString(request.ConnectionString);
         var result = await _sessionTools.QuickCapture(
             request.SessionName,
-            connStr,
             request.Databases,
             request.Applications,
             request.Logins,
@@ -176,7 +145,6 @@ public class ProfilerController : ControllerBase
     /// Retrieve captured events from a profiling session with filtering.
     /// </summary>
     /// <param name="sessionName">Name of the profiling session.</param>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     /// <param name="startTime">Filter events after this time (ISO format: '2024-01-15T10:30:00').</param>
     /// <param name="endTime">Filter events before this time (ISO format).</param>
     /// <param name="database">Filter to specific database.</param>
@@ -194,7 +162,6 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> GetEvents(
         [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null,
         [FromQuery] string? startTime = null,
         [FromQuery] string? endTime = null,
         [FromQuery] string? database = null,
@@ -209,9 +176,8 @@ public class ProfilerController : ControllerBase
         [FromQuery] bool deduplicate = true,
         [FromQuery] string responseFormat = "Json")
     {
-        var connStr = ResolveConnectionString(connectionString);
         var result = await _eventTools.GetEvents(
-            sessionName, connStr, startTime, endTime, database, application,
+            sessionName, startTime, endTime, database, application,
             login, textContains, textNotContains, minDurationMs, limit, offset,
             sortBy, deduplicate, responseFormat);
         return JsonContent(result);
@@ -221,7 +187,6 @@ public class ProfilerController : ControllerBase
     /// Get aggregate statistics from captured events grouped by query fingerprint, database, application, or login.
     /// </summary>
     /// <param name="sessionName">Name of the profiling session.</param>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     /// <param name="startTime">Analysis window start (ISO format).</param>
     /// <param name="endTime">Analysis window end (ISO format).</param>
     /// <param name="groupBy">Group by: QueryFingerprint, Database, Application, Login, or None.</param>
@@ -231,16 +196,14 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> GetStats(
         [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null,
         [FromQuery] string? startTime = null,
         [FromQuery] string? endTime = null,
         [FromQuery] string groupBy = "QueryFingerprint",
         [FromQuery] int topN = 20,
         [FromQuery] string responseFormat = "Markdown")
     {
-        var connStr = ResolveConnectionString(connectionString);
         var result = await _eventTools.GetStats(
-            sessionName, connStr, startTime, endTime, groupBy, topN, responseFormat);
+            sessionName, startTime, endTime, groupBy, topN, responseFormat);
         return JsonContent(result);
     }
 
@@ -249,7 +212,6 @@ public class ProfilerController : ControllerBase
     /// Use correlationId to track queries containing a specific identifier or sessionId to follow a specific SPID.
     /// </summary>
     /// <param name="sessionName">Name of the profiling session.</param>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     /// <param name="startTime">Analysis window start (ISO format).</param>
     /// <param name="endTime">Analysis window end (ISO format).</param>
     /// <param name="correlationId">Text to search for in queries (e.g., order ID, request ID).</param>
@@ -259,16 +221,14 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> AnalyzeSequence(
         [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null,
         [FromQuery] string? startTime = null,
         [FromQuery] string? endTime = null,
         [FromQuery] string? correlationId = null,
         [FromQuery] int? sessionId = null,
         [FromQuery] string responseFormat = "Markdown")
     {
-        var connStr = ResolveConnectionString(connectionString);
         var result = await _eventTools.AnalyzeSequence(
-            sessionName, connStr, startTime, endTime, correlationId, sessionId, responseFormat);
+            sessionName, startTime, endTime, correlationId, sessionId, responseFormat);
         return JsonContent(result);
     }
 
@@ -279,16 +239,13 @@ public class ProfilerController : ControllerBase
     /// <summary>
     /// Get information about databases, applications, logins, or active sessions on the SQL Server.
     /// </summary>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     /// <param name="infoType">What to retrieve: databases, applications, logins, sessions, or all. Default all.</param>
     [HttpGet("connection-info")]
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> GetConnectionInfo(
-        [FromQuery] string? connectionString = null,
         [FromQuery] string infoType = "all")
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _eventTools.GetConnectionInfo(connStr, infoType);
+        var result = await _eventTools.GetConnectionInfo(infoType);
         return JsonContent(result);
     }
 
@@ -299,14 +256,11 @@ public class ProfilerController : ControllerBase
     /// <summary>
     /// Check if the current SQL Server login has the required permissions for profiling.
     /// </summary>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     [HttpGet("permissions/check")]
     [ProducesResponseType(typeof(string), 200)]
-    public async Task<IActionResult> CheckPermissions(
-        [FromQuery] string? connectionString = null)
+    public async Task<IActionResult> CheckPermissions()
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _permissionTools.CheckPermissions(connStr);
+        var result = await _permissionTools.CheckPermissions();
         return JsonContent(result);
     }
 
@@ -318,8 +272,7 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> GrantPermissions([FromBody] GrantPermissionsRequest request)
     {
-        var connStr = ResolveConnectionString(request.ConnectionString);
-        var result = await _permissionTools.GrantPermissions(connStr, request.TargetLogin);
+        var result = await _permissionTools.GrantPermissions(request.TargetLogin);
         return JsonContent(result);
     }
 
@@ -334,11 +287,9 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> GetDeadlocks(
         [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null,
         [FromQuery] string responseFormat = "Markdown")
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _diagnosticTools.GetDeadlocks(sessionName, connStr, responseFormat);
+        var result = await _diagnosticTools.GetDeadlocks(sessionName, responseFormat);
         return JsonContent(result);
     }
 
@@ -349,11 +300,9 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> GetBlocking(
         [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null,
         [FromQuery] string responseFormat = "Markdown")
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _diagnosticTools.GetBlocking(sessionName, connStr, responseFormat);
+        var result = await _diagnosticTools.GetBlocking(sessionName, responseFormat);
         return JsonContent(result);
     }
 
@@ -363,12 +312,10 @@ public class ProfilerController : ControllerBase
     [HttpGet("wait-stats")]
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> GetWaitStats(
-        [FromQuery] string? connectionString = null,
         [FromQuery] int topN = 20,
         [FromQuery] string responseFormat = "Markdown")
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _diagnosticTools.GetWaitStats(connStr, topN, responseFormat);
+        var result = await _diagnosticTools.GetWaitStats(topN, responseFormat);
         return JsonContent(result);
     }
 
@@ -378,13 +325,11 @@ public class ProfilerController : ControllerBase
     [HttpGet("health")]
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> HealthCheck(
-        [FromQuery] string? connectionString = null,
         [FromQuery] string? sessionName = null,
         [FromQuery] int slowQueryThresholdMs = 1000,
         [FromQuery] string responseFormat = "Markdown")
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _diagnosticTools.HealthCheck(connStr, sessionName ?? "", slowQueryThresholdMs, responseFormat);
+        var result = await _diagnosticTools.HealthCheck(sessionName ?? "", slowQueryThresholdMs, responseFormat);
         return JsonContent(result);
     }
 
@@ -430,11 +375,9 @@ public class ProfilerController : ControllerBase
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> QueryHistory(
         [FromRoute] string queryFingerprint,
-        [FromQuery] string? connectionString = null,
         [FromQuery] string responseFormat = "Json")
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _memoryTools.QueryHistory(connStr, queryFingerprint, responseFormat);
+        var result = await _memoryTools.QueryHistory(queryFingerprint, responseFormat);
         return JsonContent(result);
     }
 
@@ -444,7 +387,6 @@ public class ProfilerController : ControllerBase
     [HttpGet("memory/queries/search")]
     [ProducesResponseType(typeof(string), 200)]
     public async Task<IActionResult> SearchQueries(
-        [FromQuery] string? connectionString = null,
         [FromQuery] string? sqlContains = null,
         [FromQuery] string? database = null,
         [FromQuery] int? minExecutions = null,
@@ -452,8 +394,7 @@ public class ProfilerController : ControllerBase
         [FromQuery] int limit = 20,
         [FromQuery] string responseFormat = "Json")
     {
-        var connStr = ResolveConnectionString(connectionString);
-        var result = await _memoryTools.SearchQueries(connStr, sqlContains, database, minExecutions, minAvgDurationMs, limit, responseFormat);
+        var result = await _memoryTools.SearchQueries(sqlContains, database, minExecutions, minAvgDurationMs, limit, responseFormat);
         return JsonContent(result);
     }
 
@@ -504,19 +445,17 @@ public class ProfilerController : ControllerBase
     /// Connect with curl -N or EventSource in JavaScript. Events are pushed as they are captured.
     /// </summary>
     /// <param name="sessionName">Name of the profiling session (must be running).</param>
-    /// <param name="connectionString">Optional SQL Server connection string override.</param>
     /// <param name="database">Filter to specific database.</param>
     /// <param name="application">Filter to specific application.</param>
     /// <param name="textContains">Filter to queries containing this text.</param>
     [HttpGet("sessions/{sessionName}/stream")]
     public async Task StreamEvents(
         [FromRoute] string sessionName,
-        [FromQuery] string? connectionString = null,
         [FromQuery] string? database = null,
         [FromQuery] string? application = null,
         [FromQuery] string? textContains = null)
     {
-        var connStr = ResolveConnectionString(connectionString);
+        var connStr = ConnectionStringResolver.Resolve();
 
         var filters = new EventFilters
         {
