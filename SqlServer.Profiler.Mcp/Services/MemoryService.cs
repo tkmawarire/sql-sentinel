@@ -134,6 +134,7 @@ public class MemoryService : IMemoryService, IHostedService, IDisposable
         }
         catch (Exception ex)
         {
+            _disabled = true;
             _logger.LogWarning(ex, "MemoryService startup failed — memory features will be unavailable");
         }
     }
@@ -164,6 +165,10 @@ public class MemoryService : IMemoryService, IHostedService, IDisposable
     {
         if (_disabled)
             return new CaptureMemory { Id = "disabled", ServerName = serverName, SessionName = sessionName };
+
+        // Ensure storage directories exist (defense-in-depth for late startup)
+        Directory.CreateDirectory(_basePath);
+        Directory.CreateDirectory(Path.Combine(_basePath, "queries"));
 
         // Deduplication guard: same server+session within 60s is likely redundant
         var dedupeKey = $"{serverName}|{sessionName}";

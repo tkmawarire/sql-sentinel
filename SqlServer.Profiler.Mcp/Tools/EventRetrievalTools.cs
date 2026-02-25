@@ -108,7 +108,7 @@ public class EventRetrievalTools
                     var serverName = MemoryService.ExtractServerName(connectionString);
                     await _memoryService.SaveCaptureAsync(serverName, sessionName, allEventsForMemory);
                 }
-                catch { /* Memory failures never break primary operations */ }
+                catch (Exception ex) { _logger.LogWarning(ex, "Memory auto-save failed for session {Session}", sessionName); }
             });
 
             var result = new
@@ -297,7 +297,7 @@ public class EventRetrievalTools
                     var serverName = MemoryService.ExtractServerName(connectionString);
                     await _memoryService.SaveCaptureAsync(serverName, sessionName, events, insights: insights);
                 }
-                catch { /* Memory failures never break primary operations */ }
+                catch (Exception ex) { _logger.LogWarning(ex, "Memory auto-save failed for session {Session}", sessionName); }
             });
 
             var result = new { summary, groupBy, topN, stats, insights };
@@ -724,7 +724,7 @@ public class EventRetrievalTools
                         var serverName = MemoryService.ExtractServerName(connectionString);
                         await _memoryService.SaveCaptureAsync(serverName, sessionName, events);
                     }
-                    catch { /* Memory failures never break primary operations */ }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Memory auto-save failed for session {Session}", sessionName); }
                 });
             }
 

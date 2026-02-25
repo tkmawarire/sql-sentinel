@@ -404,7 +404,7 @@ public class DiagnosticTools
                         await _memoryService.SaveCaptureAsync(serverName, sessionName, events,
                             deadlocks: deadlocksSnapshot, blockingEvents: blockingSnapshot, insights: insightsSnapshot);
                     }
-                    catch { /* Memory failures never break primary operations */ }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Memory auto-save failed for session {Session}", sessionName); }
                 });
             }
 

@@ -49,7 +49,7 @@ RUN apt-get update \
 LABEL io.modelcontextprotocol.server.name="io.github.tkmawarire/sql-sentinel"
 LABEL org.opencontainers.image.title="SQL Sentinel MCP Server"
 LABEL org.opencontainers.image.description="SQL Server monitoring and diagnostics for AI agents using Extended Events"
-LABEL org.opencontainers.image.version="2.3.0"
+LABEL org.opencontainers.image.version="2.3.1"
 LABEL org.opencontainers.image.source="https://github.com/tkmawarire/sql-sentinel"
 LABEL org.opencontainers.image.licenses="MIT"
 
