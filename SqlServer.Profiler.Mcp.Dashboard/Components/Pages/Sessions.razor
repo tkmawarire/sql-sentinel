@@ -10,7 +10,7 @@
 
 <PageTitle>Sessions - SQL Sentinel</PageTitle>
 
-{{!-- Page header --}}
+@* Page header *@
 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
     <MudStack Spacing="0">
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Session Manager</MudText>
@@ -41,7 +41,7 @@
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="border-radius: 4px; margin-bottom: 16px;" />
 }
 
-{{!-- Session list --}}
+@* Session list *@
 <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden; margin-bottom: 24px;">
     @if (_sessions.Count == 0 && !_loading)
     {
@@ -62,7 +62,7 @@
                      Style="background: transparent;">
             <Columns>
 
-                {{!-- Display Name --}}
+                @* Display Name *@
                 <PropertyColumn T="SessionInfo" TProperty="string"
                                 Property="@(s => s.DisplayName)"
                                 Title="Name"
@@ -75,7 +75,7 @@
                     </CellTemplate>
                 </PropertyColumn>
 
-                {{!-- State chip --}}
+                @* State chip *@
                 <PropertyColumn T="SessionInfo" TProperty="string"
                                 Property="@(s => s.State)"
                                 Title="State"
@@ -83,7 +83,7 @@
                                 HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 14px;">
                     <CellTemplate>
                         <div style="padding: 4px 14px;">
-                            @if (context.Item.State == "STARTED")
+                            @if (context.Item.State == "RUNNING")
                             {
                                 <MudChip T="string"
                                          Icon="@Icons.Material.Filled.Circle"
@@ -106,7 +106,7 @@
                     </CellTemplate>
                 </PropertyColumn>
 
-                {{!-- Buffer used --}}
+                @* Buffer used *@
                 <TemplateColumn T="SessionInfo"
                                 Title="Buffer Used"
                                 Sortable="false"
@@ -114,7 +114,7 @@
                     <CellTemplate>
                         @{
                             var session = context.Item;
-                            var configRingMb = ConfigStore.Get(session.SessionName)?.RingBufferMb ?? 50;
+                            var configRingMb = ConfigStore.Get(session.DisplayName)?.RingBufferMb ?? 50;
                             var maxBytes = (long)configRingMb * 1024 * 1024;
                             var pct = maxBytes > 0
                                 ? (int)Math.Min(100, session.BufferUsedBytes * 100 / maxBytes)
@@ -134,7 +134,7 @@
                     </CellTemplate>
                 </TemplateColumn>
 
-                {{!-- Created time --}}
+                @* Created time *@
                 <PropertyColumn T="SessionInfo" TProperty="DateTime?"
                                 Property="@(s => s.CreateTime)"
                                 Title="Created"
@@ -149,7 +149,7 @@
                     </CellTemplate>
                 </PropertyColumn>
 
-                {{!-- Actions --}}
+                @* Actions *@
                 <TemplateColumn T="SessionInfo"
                                 Title="Actions"
                                 Sortable="false"
@@ -159,22 +159,22 @@
                             <MudTooltip Text="Start session">
                                 <MudIconButton Icon="@Icons.Material.Filled.PlayArrow"
                                                Size="Size.Small"
-                                               Disabled="@(context.Item.State == "STARTED" || _busy)"
-                                               OnClick="@(() => StartSession(context.Item.SessionName))"
-                                               Style="@(context.Item.State == "STARTED" ? "color: #334155;" : "color: #22c55e;")" />
+                                               Disabled="@(context.Item.State == "RUNNING" || _busy)"
+                                               OnClick="@(() => StartSession(context.Item.DisplayName))"
+                                               Style="@(context.Item.State == "RUNNING" ? "color: #334155;" : "color: #22c55e;")" />
                             </MudTooltip>
                             <MudTooltip Text="Stop session">
                                 <MudIconButton Icon="@Icons.Material.Filled.Stop"
                                                Size="Size.Small"
-                                               Disabled="@(context.Item.State != "STARTED" || _busy)"
-                                               OnClick="@(() => StopSession(context.Item.SessionName))"
-                                               Style="@(context.Item.State != "STARTED" ? "color: #334155;" : "color: #f59e0b;")" />
+                                               Disabled="@(context.Item.State != "RUNNING" || _busy)"
+                                               OnClick="@(() => StopSession(context.Item.DisplayName))"
+                                               Style="@(context.Item.State != "RUNNING" ? "color: #334155;" : "color: #f59e0b;")" />
                             </MudTooltip>
                             <MudTooltip Text="Drop session (permanent)">
                                 <MudIconButton Icon="@Icons.Material.Filled.DeleteForever"
                                                Size="Size.Small"
                                                Disabled="@_busy"
-                                               OnClick="@(() => DropSession(context.Item.SessionName))"
+                                               OnClick="@(() => DropSession(context.Item.DisplayName))"
                                                Style="color: #ef4444;" />
                             </MudTooltip>
                         </div>
@@ -186,7 +186,7 @@
     }
 </MudPaper>
 
-{{!-- Quick Capture section --}}
+@* Quick Capture section *@
 <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 20px 24px;">
     <MudStack Spacing="0" Class="mb-4">
         <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #e2e8f0;">Quick Capture</MudText>

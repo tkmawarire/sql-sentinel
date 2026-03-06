@@ -11,7 +11,7 @@
     <DialogContent>
         <MudForm @ref="_form" @bind-IsValid="_formValid">
 
-            {{!-- Session name --}}
+            @* Session name *@
             <MudTextField @bind-Value="_sessionName"
                           Label="Session Name"
                           Variant="Variant.Outlined"
@@ -21,7 +21,7 @@
                           HelperText="Alphanumeric, underscore, and hyphen only."
                           Style="background: #020617;" />
 
-            {{!-- Event types --}}
+            @* Event types *@
             <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="color: #94a3b8; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;">
                 Event Types
             </MudText>
@@ -42,7 +42,7 @@
                 </MudGrid>
             </MudPaper>
 
-            {{!-- Filters --}}
+            @* Filters *@
             <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="color: #94a3b8; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;">
                 Filters
             </MudText>
@@ -64,7 +64,7 @@
                               Style="background: #020617;" />
             </MudStack>
 
-            {{!-- Min duration slider --}}
+            @* Min duration slider *@
             <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1" Style="color: #94a3b8; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;">
                 Performance Thresholds
             </MudText>
@@ -89,7 +89,7 @@
                 </MudSlider>
             </MudStack>
 
-            {{!-- Noise filter --}}
+            @* Noise filter *@
             <MudSwitch @bind-Value="_excludeNoise"
                        Label="Exclude noise patterns (sp_reset_connection, SET statements, etc.)"
                        Color="Color.Primary"

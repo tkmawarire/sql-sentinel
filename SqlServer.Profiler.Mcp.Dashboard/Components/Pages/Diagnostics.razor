@@ -9,7 +9,7 @@
 
 <PageTitle>Diagnostics - SQL Sentinel</PageTitle>
 
-{{!-- Page header --}}
+@* Page header *@
 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
     <MudStack Spacing="0">
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Diagnostics</MudText>
@@ -32,10 +32,10 @@
          TabHeaderClass="mud-tabs-header-custom"
          ActivePanelIndexChanged="OnTabChanged">
 
-    {{!-- ==================== TAB 1: HEALTH OVERVIEW ==================== --}}
+    @* ==================== TAB 1: HEALTH OVERVIEW ==================== *@
     <MudTabPanel Text="Health Overview" Icon="@Icons.Material.Filled.MonitorHeart">
 
-        {{!-- Session selector + refresh --}}
+        @* Session selector + refresh *@
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-4" Style="flex-wrap: wrap; gap: 8px;">
             <MudSelect T="string"
                        Value="_healthSession"
@@ -47,11 +47,11 @@
                        Disabled="@_healthLoading">
                 @foreach (var s in _sessions)
                 {
-                    <MudSelectItem T="string" Value="@s.SessionName">
+                    <MudSelectItem T="string" Value="@s.DisplayName">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                             <MudIcon Icon="@Icons.Material.Filled.Circle"
                                      Size="MudBlazor.Size.Small"
-                                     Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                                     Style="@(s.State == "RUNNING" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
                             <span>@s.DisplayName</span>
                         </MudStack>
                     </MudSelectItem>
@@ -72,7 +72,7 @@
             <MudProgressLinear Indeterminate="true" Color="MudBlazor.Color.Primary" Style="border-radius: 4px; margin-bottom: 16px;" />
         }
 
-        {{!-- Metric tiles --}}
+        @* Metric tiles *@
         <MudGrid Spacing="2" Class="mb-4">
             <MudItem xs="12" sm="6" md="3">
                 <MetricTile Label="Active Blocking"
@@ -149,7 +149,7 @@
         }
     </MudTabPanel>
 
-    {{!-- ==================== TAB 2: DEADLOCKS ==================== --}}
+    @* ==================== TAB 2: DEADLOCKS ==================== *@
     <MudTabPanel Text="Deadlocks" Icon="@Icons.Material.Filled.SyncProblem">
 
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-4" Style="flex-wrap: wrap; gap: 8px;">
@@ -163,11 +163,11 @@
                        Disabled="@_deadlockLoading">
                 @foreach (var s in _sessions)
                 {
-                    <MudSelectItem T="string" Value="@s.SessionName">
+                    <MudSelectItem T="string" Value="@s.DisplayName">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                             <MudIcon Icon="@Icons.Material.Filled.Circle"
                                      Size="MudBlazor.Size.Small"
-                                     Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                                     Style="@(s.State == "RUNNING" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
                             <span>@s.DisplayName</span>
                         </MudStack>
                     </MudSelectItem>
@@ -298,10 +298,10 @@
         }
     </MudTabPanel>
 
-    {{!-- ==================== TAB 3: BLOCKING ==================== --}}
+    @* ==================== TAB 3: BLOCKING ==================== *@
     <MudTabPanel Text="Blocking" Icon="@Icons.Material.Filled.Block">
 
-        {{!-- Section 1: Active Blocking (Live) --}}
+        @* Section 1: Active Blocking (Live) *@
         <MudText Typo="Typo.subtitle2" Style="color: #06b6d4; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; margin-bottom: 10px; display: block;">
             Active Blocking (Live — updates every 5s)
         </MudText>
@@ -378,7 +378,7 @@
             </MudPaper>
         }
 
-        {{!-- Section 2: Historical Blocking --}}
+        @* Section 2: Historical Blocking *@
         <MudText Typo="Typo.subtitle2" Style="color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; margin-bottom: 10px; display: block;">
             Historical Blocking Events
         </MudText>
@@ -394,11 +394,11 @@
                        Disabled="@_blockingLoading">
                 @foreach (var s in _sessions)
                 {
-                    <MudSelectItem T="string" Value="@s.SessionName">
+                    <MudSelectItem T="string" Value="@s.DisplayName">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                             <MudIcon Icon="@Icons.Material.Filled.Circle"
                                      Size="MudBlazor.Size.Small"
-                                     Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                                     Style="@(s.State == "RUNNING" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
                             <span>@s.DisplayName</span>
                         </MudStack>
                     </MudSelectItem>
@@ -492,7 +492,7 @@
         }
     </MudTabPanel>
 
-    {{!-- ==================== TAB 4: WAIT STATS ==================== --}}
+    @* ==================== TAB 4: WAIT STATS ==================== *@
     <MudTabPanel Text="Wait Stats" Icon="@Icons.Material.Filled.Timer">
 
         @if (_waitStats.Count == 0)
@@ -612,7 +612,7 @@
         }
     </MudTabPanel>
 
-    {{!-- ==================== TAB 5: ANOMALIES ==================== --}}
+    @* ==================== TAB 5: ANOMALIES ==================== *@
     <MudTabPanel Text="Anomalies" Icon="@Icons.Material.Filled.TravelExplore">
 
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-4" Style="flex-wrap: wrap; gap: 8px;">
@@ -626,11 +626,11 @@
                        Disabled="@_anomalyLoading">
                 @foreach (var s in _sessions)
                 {
-                    <MudSelectItem T="string" Value="@s.SessionName">
+                    <MudSelectItem T="string" Value="@s.DisplayName">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                             <MudIcon Icon="@Icons.Material.Filled.Circle"
                                      Size="MudBlazor.Size.Small"
-                                     Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                                     Style="@(s.State == "RUNNING" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
                             <span>@s.DisplayName</span>
                         </MudStack>
                     </MudSelectItem>
@@ -654,7 +654,7 @@
             </MudButton>
         </MudStack>
 
-        {{!-- Threshold slider --}}
+        @* Threshold slider *@
         <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 20px; margin-bottom: 16px;">
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
                 <MudText Typo="Typo.caption" Style="color: #64748b; white-space: nowrap;">Deviation Threshold:</MudText>

@@ -10,7 +10,7 @@
 
 <PageTitle>Query Analytics - SQL Sentinel</PageTitle>
 
-{{!-- Page header --}}
+@* Page header *@
 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
     <MudStack Spacing="0">
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Query Analytics</MudText>
@@ -28,11 +28,11 @@
                    Disabled="@_loading">
             @foreach (var s in _sessions)
             {
-                <MudSelectItem T="string" Value="@s.SessionName">
+                <MudSelectItem T="string" Value="@s.DisplayName">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                         <MudIcon Icon="@Icons.Material.Filled.Circle"
                                  Size="MudBlazor.Size.Small"
-                                 Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                                 Style="@(s.State == "RUNNING" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
                         <span>@s.DisplayName</span>
                     </MudStack>
                 </MudSelectItem>
@@ -50,7 +50,7 @@
     </MudStack>
 </MudStack>
 
-{{!-- Group-by toolbar --}}
+@* Group-by toolbar *@
 <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 18px; margin-bottom: 12px;">
     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="flex-wrap: wrap; gap: 8px;">
         <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;">Group by:</MudText>
@@ -69,7 +69,7 @@
 
         <MudDivider Vertical="true" Style="height: 24px; border-color: #1e293b;" />
 
-        {{!-- Time range pickers --}}
+        @* Time range pickers *@
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="flex-wrap: wrap; gap: 8px;">
             <MudDatePicker Date="_startDate"
                            DateChanged="OnStartDateChanged"
@@ -89,7 +89,7 @@
     </MudStack>
 </MudPaper>
 
-{{!-- Metric tiles --}}
+@* Metric tiles *@
 <MudGrid Spacing="2" Class="mb-4">
     <MudItem xs="12" sm="6" md="3">
         <MetricTile Label="Total Events"

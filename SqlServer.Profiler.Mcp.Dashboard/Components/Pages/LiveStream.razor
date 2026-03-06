@@ -6,7 +6,7 @@
 
 <PageTitle>Live Event Stream - SQL Sentinel</PageTitle>
 
-{{!-- Page header --}}
+@* Page header *@
 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
     <MudStack Spacing="0">
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Live Event Stream</MudText>
@@ -14,7 +14,7 @@
     </MudStack>
 
     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-        {{!-- Session selector --}}
+        @* Session selector *@
         <MudSelect T="string"
                    Value="_selectedSession"
                    ValueChanged="OnSessionSelected"
@@ -25,18 +25,18 @@
                    Disabled="@_isStreaming">
             @foreach (var session in _sessions)
             {
-                <MudSelectItem T="string" Value="@session.SessionName">
+                <MudSelectItem T="string" Value="@session.DisplayName">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                         <MudIcon Icon="@Icons.Material.Filled.Circle"
                                  Size="Size.Small"
-                                 Style="@(session.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                                 Style="@(session.State == "RUNNING" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
                         <span>@session.DisplayName</span>
                     </MudStack>
                 </MudSelectItem>
             }
         </MudSelect>
 
-        {{!-- Play / Pause --}}
+        @* Play / Pause *@
         @if (!_isStreaming)
         {
             <MudTooltip Text="Start streaming">
@@ -80,7 +80,7 @@
             </MudTooltip>
         }
 
-        {{!-- Clear --}}
+        @* Clear *@
         <MudTooltip Text="Clear events">
             <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep"
                            Color="Color.Default"
@@ -89,7 +89,7 @@
                            Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;" />
         </MudTooltip>
 
-        {{!-- Event counter --}}
+        @* Event counter *@
         <MudPaper Elevation="0" Style="background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.25); border-radius: 8px; padding: 6px 14px;">
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
                 <MudIcon Icon="@Icons.Material.Filled.DataArray" Size="Size.Small" Style="color: #06b6d4;" />
@@ -99,7 +99,7 @@
     </MudStack>
 </MudStack>
 
-{{!-- Metric tiles --}}
+@* Metric tiles *@
 <MudGrid Spacing="2" Class="mb-4">
     <MudItem xs="12" sm="6" md="3">
         <MetricTile Label="Events / sec"
@@ -127,7 +127,7 @@
     </MudItem>
 </MudGrid>
 
-{{!-- Filter bar --}}
+@* Filter bar *@
 <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="flex-wrap: wrap; gap: 10px;">
         <MudTextField @bind-Value="_textFilter"
@@ -175,7 +175,7 @@
             Clear filters
         </MudButton>
 
-        {{!-- Active filter chips --}}
+        @* Active filter chips *@
         @if (!string.IsNullOrWhiteSpace(_textFilter) || !string.IsNullOrWhiteSpace(_databaseFilter) || _minDurationUs > 0)
         {
             <MudChipSet T="string" Style="display: flex; flex-wrap: wrap; gap: 4px;">
@@ -214,7 +214,7 @@
     </MudStack>
 </MudPaper>
 
-{{!-- Event table --}}
+@* Event table *@
 <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
     @if (!_isStreaming && _filteredEvents.Count == 0)
     {

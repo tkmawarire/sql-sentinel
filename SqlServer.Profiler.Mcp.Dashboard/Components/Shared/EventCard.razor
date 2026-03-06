@@ -13,7 +13,7 @@
         @if (Event is not null)
         {
             <MudStack Spacing="3">
-                {{!-- Metrics grid --}}
+                @* Metrics grid *@
                 <MudGrid Spacing="2">
                     <MudItem xs="6" sm="3">
                         <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
@@ -62,7 +62,7 @@
                     }
                 </MudGrid>
 
-                {{!-- SQL Text --}}
+                @* SQL Text *@
                 @if (!string.IsNullOrWhiteSpace(Event.SqlText))
                 {
                     <div>
@@ -73,7 +73,7 @@
                     </div>
                 }
 
-                {{!-- Error message --}}
+                @* Error message *@
                 @if (!string.IsNullOrWhiteSpace(Event.ErrorMessage))
                 {
                     <MudAlert Severity="Severity.Error" Dense="true" Style="background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3);">
@@ -81,7 +81,7 @@
                     </MudAlert>
                 }
 
-                {{!-- Query Fingerprint --}}
+                @* Query Fingerprint *@
                 @if (!string.IsNullOrWhiteSpace(Event.QueryFingerprint))
                 {
                     <div>
@@ -92,7 +92,7 @@
                     </div>
                 }
 
-                {{!-- Metadata --}}
+                @* Metadata *@
                 <div>
                     <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; margin-bottom: 8px; display: block;">Metadata</MudText>
                     <MudGrid Spacing="1">
