@@ -1,0 +1,254 @@
+@using SqlServer.Profiler.Mcp.Tools
+@using SqlServer.Profiler.Mcp.Utilities
+@inject IProfilerService ProfilerService
+@inject SessionConfigStore ConfigStore
+@inject ILogger<CreateSessionDialog> Logger
+
+<MudDialog Style="background: #0f172a; border: 1px solid #1e293b;">
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color: #e2e8f0; font-weight: 600;">Create Profiling Session</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" @bind-IsValid="_formValid">
+
+            {{!-- Session name --}}
+            <MudTextField @bind-Value="_sessionName"
+                          Label="Session Name"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          RequiredError="Session name is required."
+                          Validation="@(new Func<string, string?>(ValidateSessionName))"
+                          HelperText="Alphanumeric, underscore, and hyphen only."
+                          Style="background: #020617;" />
+
+            {{!-- Event types --}}
+            <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="color: #94a3b8; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;">
+                Event Types
+            </MudText>
+            <MudPaper Elevation="0" Style="background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                <MudGrid Spacing="0">
+                    @foreach (var et in _allEventTypes)
+                    {
+                        <MudItem xs="12" sm="6">
+                            <MudCheckBox T="bool"
+                                         Value="@_selectedEventTypes.Contains(et)"
+                                         ValueChanged="@(v => ToggleEventType(et, v))"
+                                         Label="@et.ToString()"
+                                         Color="Color.Primary"
+                                         Size="Size.Small"
+                                         Style="color: #e2e8f0;" />
+                        </MudItem>
+                    }
+                </MudGrid>
+            </MudPaper>
+
+            {{!-- Filters --}}
+            <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="color: #94a3b8; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;">
+                Filters
+            </MudText>
+            <MudStack Spacing="3">
+                <MudTextField @bind-Value="_databases"
+                              Label="Databases (comma-separated)"
+                              Variant="Variant.Outlined"
+                              HelperText="Leave empty to capture all databases."
+                              Style="background: #020617;" />
+                <MudTextField @bind-Value="_applications"
+                              Label="Applications (comma-separated)"
+                              Variant="Variant.Outlined"
+                              HelperText="Filter by application name in the connection string."
+                              Style="background: #020617;" />
+                <MudTextField @bind-Value="_logins"
+                              Label="Logins (comma-separated)"
+                              Variant="Variant.Outlined"
+                              HelperText="Filter by SQL login name."
+                              Style="background: #020617;" />
+            </MudStack>
+
+            {{!-- Min duration slider --}}
+            <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1" Style="color: #94a3b8; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;">
+                Performance Thresholds
+            </MudText>
+            <MudStack Spacing="4">
+                <MudSlider @bind-Value="_minDurationMs"
+                           Min="0" Max="10000" Step="100"
+                           Color="Color.Primary"
+                           Style="color: #e2e8f0;">
+                    <MudText Typo="Typo.body2" Style="color: #94a3b8;">
+                        Min Duration: <strong style="color: #06b6d4;">@(_minDurationMs)ms</strong>
+                        @if (_minDurationMs == 0) { <span style="color: #64748b;"> (capture all)</span> }
+                    </MudText>
+                </MudSlider>
+
+                <MudSlider @bind-Value="_ringBufferMb"
+                           Min="10" Max="200" Step="10"
+                           Color="Color.Primary"
+                           Style="color: #e2e8f0;">
+                    <MudText Typo="Typo.body2" Style="color: #94a3b8;">
+                        Ring Buffer: <strong style="color: #06b6d4;">@(_ringBufferMb)MB</strong>
+                    </MudText>
+                </MudSlider>
+            </MudStack>
+
+            {{!-- Noise filter --}}
+            <MudSwitch @bind-Value="_excludeNoise"
+                       Label="Exclude noise patterns (sp_reset_connection, SET statements, etc.)"
+                       Color="Color.Primary"
+                       Class="mt-3"
+                       Style="color: #e2e8f0;" />
+
+        </MudForm>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3" Style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);">
+                @_errorMessage
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Style="color: #94a3b8;">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Outlined"
+                   OnClick="Create"
+                   Disabled="@(!_formValid || _busy)"
+                   StartIcon="@Icons.Material.Filled.Add">
+            @(_busy ? "Creating..." : "Create")
+        </MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   OnClick="CreateAndStart"
+                   Disabled="@(!_formValid || _busy)"
+                   StartIcon="@Icons.Material.Filled.PlayArrow">
+            @(_busy ? "Starting..." : "Create & Start")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    // ---- Form state ----
+
+    private MudForm _form = null!;
+    private bool _formValid;
+    private bool _busy;
+    private string? _errorMessage;
+
+    private string? _sessionName;
+    private string? _databases;
+    private string? _applications;
+    private string? _logins;
+    private double _minDurationMs;
+    private double _ringBufferMb = 50;
+    private bool _excludeNoise = true;
+
+    // ---- Event type selection ----
+
+    private static readonly List<EventType> _allEventTypes =
+        Enum.GetValues<EventType>()
+            .Where(e => e != EventType.All)
+            .ToList();
+
+    private readonly HashSet<EventType> _selectedEventTypes =
+    [
+        EventType.SqlBatchCompleted,
+        EventType.RpcCompleted
+    ];
+
+    // ---- Validation ----
+
+    private static string? ValidateSessionName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "Session name is required.";
+        if (!SqlInputValidator.IsValidSessionName(name))
+            return "Only letters, digits, underscores, and hyphens are allowed.";
+        if (name.Length > 64)
+            return "Session name must be 64 characters or fewer.";
+        return null;
+    }
+
+    private void ToggleEventType(EventType et, bool selected)
+    {
+        if (selected)
+            _selectedEventTypes.Add(et);
+        else
+            _selectedEventTypes.Remove(et);
+    }
+
+    // ---- Helpers ----
+
+    private static List<string> ParseCsv(string? input) =>
+        string.IsNullOrWhiteSpace(input)
+            ? []
+            : input.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private SessionConfig BuildConfig() => new()
+    {
+        SessionName = _sessionName!,
+        Databases = ParseCsv(_databases),
+        Applications = ParseCsv(_applications),
+        Logins = ParseCsv(_logins),
+        MinDurationMs = (int)_minDurationMs,
+        RingBufferMb = (int)_ringBufferMb,
+        EventTypes = _selectedEventTypes.Count > 0
+            ? _selectedEventTypes.ToList()
+            : [EventType.SqlBatchCompleted, EventType.RpcCompleted],
+        ExcludePatterns = _excludeNoise ? NoisePatterns.Default : []
+    };
+
+    // ---- Actions ----
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Create()
+    {
+        await _form.Validate();
+        if (!_formValid) return;
+
+        _busy = true;
+        _errorMessage = null;
+        try
+        {
+            var config = BuildConfig();
+            var connStr = ConnectionStringResolver.Resolve();
+            await ProfilerService.CreateSessionAsync(connStr, config);
+            ConfigStore.Set(_sessionName!, config);
+            MudDialog.Close(DialogResult.Ok(false)); // false = created only, not started
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ErrorSanitizer.Sanitize(ex, Logger, "CreateSession");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateAndStart()
+    {
+        await _form.Validate();
+        if (!_formValid) return;
+
+        _busy = true;
+        _errorMessage = null;
+        try
+        {
+            var config = BuildConfig();
+            var connStr = ConnectionStringResolver.Resolve();
+            await ProfilerService.CreateSessionAsync(connStr, config);
+            await ProfilerService.StartSessionAsync(connStr, _sessionName!);
+            ConfigStore.Set(_sessionName!, config);
+            MudDialog.Close(DialogResult.Ok(true)); // true = created AND started
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ErrorSanitizer.Sanitize(ex, Logger, "CreateAndStartSession");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,6 +1,515 @@
 @page "/sessions"
+@using SqlServer.Profiler.Mcp.Tools
+@using SqlServer.Profiler.Mcp.Utilities
+@inject IProfilerService ProfilerService
+@inject SessionConfigStore ConfigStore
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILogger<Sessions> Logger
+@implements IAsyncDisposable
 
 <PageTitle>Sessions - SQL Sentinel</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-4" Style="font-weight: 600; color: #e2e8f0;">Session Manager</MudText>
-<MudText Typo="Typo.body2" Style="color: #94a3b8;">Extended Events session management — coming up next.</MudText>
+{{!-- Page header --}}
+<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Session Manager</MudText>
+        <MudText Typo="Typo.caption" Style="color: #64748b;">Create, start, stop, and drop Extended Events profiling sessions</MudText>
+    </MudStack>
+
+    <MudStack Row="true" Spacing="2">
+        <MudTooltip Text="Refresh sessions">
+            <MudIconButton Icon="@(_loading ? Icons.Material.Filled.HourglassTop : Icons.Material.Filled.Refresh)"
+                           Color="Color.Primary"
+                           Size="Size.Medium"
+                           Disabled="@_loading"
+                           OnClick="RefreshSessions"
+                           Style="background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.2); border-radius: 8px;" />
+        </MudTooltip>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenCreateDialog"
+                   Style="font-weight: 600;">
+            New Session
+        </MudButton>
+    </MudStack>
+</MudStack>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="border-radius: 4px; margin-bottom: 16px;" />
+}
+
+{{!-- Session list --}}
+<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden; margin-bottom: 24px;">
+    @if (_sessions.Count == 0 && !_loading)
+    {
+        <div style="padding: 60px 20px; text-align: center;">
+            <MudIcon Icon="@Icons.Material.Filled.ManageSearch" Style="color: #1e293b; font-size: 64px; display: block; margin: 0 auto 16px;" />
+            <MudText Typo="Typo.h6" Style="color: #334155; margin-bottom: 8px;">No sessions found</MudText>
+            <MudText Typo="Typo.body2" Style="color: #475569;">Click <strong>New Session</strong> to create your first profiling session.</MudText>
+        </div>
+    }
+    else
+    {
+        <MudDataGrid T="SessionInfo"
+                     Items="@_sessions"
+                     Dense="true"
+                     Hover="true"
+                     Striped="false"
+                     SortMode="SortMode.Single"
+                     Style="background: transparent;">
+            <Columns>
+
+                {{!-- Display Name --}}
+                <PropertyColumn T="SessionInfo" TProperty="string"
+                                Property="@(s => s.DisplayName)"
+                                Title="Name"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 14px;">
+                    <CellTemplate>
+                        <span style="color: #e2e8f0; font-weight: 600; font-size: 0.85rem; padding: 6px 14px; display: block;">
+                            @context.Item.DisplayName
+                        </span>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                {{!-- State chip --}}
+                <PropertyColumn T="SessionInfo" TProperty="string"
+                                Property="@(s => s.State)"
+                                Title="State"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 14px;">
+                    <CellTemplate>
+                        <div style="padding: 4px 14px;">
+                            @if (context.Item.State == "STARTED")
+                            {
+                                <MudChip T="string"
+                                         Icon="@Icons.Material.Filled.Circle"
+                                         Color="Color.Success"
+                                         Size="Size.Small"
+                                         Style="background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); font-size: 0.75rem; font-weight: 600;">
+                                    Running
+                                </MudChip>
+                            }
+                            else
+                            {
+                                <MudChip T="string"
+                                         Icon="@Icons.Material.Filled.Circle"
+                                         Size="Size.Small"
+                                         Style="background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.3); font-size: 0.75rem; font-weight: 600;">
+                                    Stopped
+                                </MudChip>
+                            }
+                        </div>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                {{!-- Buffer used --}}
+                <TemplateColumn T="SessionInfo"
+                                Title="Buffer Used"
+                                Sortable="false"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 14px;">
+                    <CellTemplate>
+                        @{
+                            var session = context.Item;
+                            var configRingMb = ConfigStore.Get(session.SessionName)?.RingBufferMb ?? 50;
+                            var maxBytes = (long)configRingMb * 1024 * 1024;
+                            var pct = maxBytes > 0
+                                ? (int)Math.Min(100, session.BufferUsedBytes * 100 / maxBytes)
+                                : 0;
+                            var barColor = pct >= 80 ? "#ef4444" : pct >= 50 ? "#f59e0b" : "#06b6d4";
+                        }
+                        <div style="padding: 6px 14px; min-width: 160px;">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                <div style="flex: 1; background: #1e293b; border-radius: 4px; height: 6px; overflow: hidden; min-width: 80px;">
+                                    <div style="width: @(pct)%; background: @barColor; height: 100%; border-radius: 4px; transition: width 0.3s ease;"></div>
+                                </div>
+                                <span style="color: #94a3b8; font-size: 0.75rem; font-family: monospace; white-space: nowrap;">
+                                    @(string.IsNullOrEmpty(session.BufferUsedFormatted) ? "0 B" : session.BufferUsedFormatted)
+                                </span>
+                            </MudStack>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+
+                {{!-- Created time --}}
+                <PropertyColumn T="SessionInfo" TProperty="DateTime?"
+                                Property="@(s => s.CreateTime)"
+                                Title="Created"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 14px;">
+                    <CellTemplate>
+                        <span style="color: #94a3b8; font-size: 0.78rem; font-family: monospace; padding: 6px 14px; display: block;">
+                            @(context.Item.CreateTime.HasValue
+                                ? context.Item.CreateTime.Value.ToLocalTime().ToString("MMM d, HH:mm")
+                                : "—")
+                        </span>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                {{!-- Actions --}}
+                <TemplateColumn T="SessionInfo"
+                                Title="Actions"
+                                Sortable="false"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 14px; text-align: right;">
+                    <CellTemplate>
+                        <div style="padding: 2px 8px; display: flex; gap: 2px; justify-content: flex-end;">
+                            <MudTooltip Text="Start session">
+                                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow"
+                                               Size="Size.Small"
+                                               Disabled="@(context.Item.State == "STARTED" || _busy)"
+                                               OnClick="@(() => StartSession(context.Item.SessionName))"
+                                               Style="@(context.Item.State == "STARTED" ? "color: #334155;" : "color: #22c55e;")" />
+                            </MudTooltip>
+                            <MudTooltip Text="Stop session">
+                                <MudIconButton Icon="@Icons.Material.Filled.Stop"
+                                               Size="Size.Small"
+                                               Disabled="@(context.Item.State != "STARTED" || _busy)"
+                                               OnClick="@(() => StopSession(context.Item.SessionName))"
+                                               Style="@(context.Item.State != "STARTED" ? "color: #334155;" : "color: #f59e0b;")" />
+                            </MudTooltip>
+                            <MudTooltip Text="Drop session (permanent)">
+                                <MudIconButton Icon="@Icons.Material.Filled.DeleteForever"
+                                               Size="Size.Small"
+                                               Disabled="@_busy"
+                                               OnClick="@(() => DropSession(context.Item.SessionName))"
+                                               Style="color: #ef4444;" />
+                            </MudTooltip>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+
+            </Columns>
+        </MudDataGrid>
+    }
+</MudPaper>
+
+{{!-- Quick Capture section --}}
+<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 20px 24px;">
+    <MudStack Spacing="0" Class="mb-4">
+        <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #e2e8f0;">Quick Capture</MudText>
+        <MudText Typo="Typo.caption" Style="color: #64748b;">Create, run, and stop a temporary session in one click</MudText>
+    </MudStack>
+
+    <MudStack Row="true" AlignItems="AlignItems.End" Spacing="3" Style="flex-wrap: wrap; gap: 12px;">
+        <MudTextField @bind-Value="_quickSessionName"
+                      Label="Session name"
+                      Variant="Variant.Outlined"
+                      Disabled="@_capturing"
+                      Style="min-width: 200px; background: #020617;"
+                      Margin="Margin.Dense" />
+
+        <MudSelect T="int"
+                   @bind-Value="_quickDurationSeconds"
+                   Label="Duration"
+                   Variant="Variant.Outlined"
+                   Disabled="@_capturing"
+                   Style="min-width: 140px; background: #020617;"
+                   Margin="Margin.Dense">
+            <MudSelectItem T="int" Value="10">10 seconds</MudSelectItem>
+            <MudSelectItem T="int" Value="30">30 seconds</MudSelectItem>
+            <MudSelectItem T="int" Value="60">1 minute</MudSelectItem>
+            <MudSelectItem T="int" Value="300">5 minutes</MudSelectItem>
+        </MudSelect>
+
+        @if (!_capturing)
+        {
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.PlayArrow"
+                       OnClick="StartQuickCapture"
+                       Disabled="@(string.IsNullOrWhiteSpace(_quickSessionName))"
+                       Style="font-weight: 600; height: 40px;">
+                Start Capture
+            </MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.Stop"
+                       OnClick="CancelQuickCapture"
+                       Style="font-weight: 600; height: 40px;">
+                Cancel
+            </MudButton>
+        }
+    </MudStack>
+
+    @if (_capturing)
+    {
+        <MudStack Spacing="2" Class="mt-4">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.FiberManualRecord"
+                         Style="color: #ef4444; font-size: 12px; animation: pulse 1s infinite;" />
+                <MudText Typo="Typo.body2" Style="color: #e2e8f0; font-weight: 600;">
+                    Capturing...
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color: #94a3b8;">
+                    @_quickCountdownRemaining s remaining
+                </MudText>
+            </MudStack>
+            <MudProgressLinear Value="@_quickProgressPct"
+                               Color="Color.Error"
+                               Rounded="true"
+                               Style="height: 6px; background: #1e293b;" />
+        </MudStack>
+    }
+</MudPaper>
+
+<style>
+    @@keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+</style>
+
+@code {
+    // ---- State ----
+
+    private List<SessionInfo> _sessions = [];
+    private bool _loading;
+    private bool _busy;
+
+    // Quick capture
+    private string _quickSessionName = "quick_capture";
+    private int _quickDurationSeconds = 30;
+    private bool _capturing;
+    private int _quickCountdownRemaining;
+    private int _quickProgressPct;
+    private CancellationTokenSource? _quickCaptureCts;
+    private Timer? _countdownTimer;
+
+    // ---- Lifecycle ----
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshSessions();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _quickCaptureCts?.Cancel();
+        _quickCaptureCts?.Dispose();
+        if (_countdownTimer is not null)
+            await _countdownTimer.DisposeAsync();
+    }
+
+    // ---- Session list ----
+
+    private async Task RefreshSessions()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            _sessions = await ProfilerService.ListSessionsAsync(connStr);
+        }
+        catch (Exception ex)
+        {
+            _sessions = [];
+            Snackbar.Add(ErrorSanitizer.Sanitize(ex, Logger, "ListSessions"), Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ---- Session actions ----
+
+    private async Task StartSession(string sessionName)
+    {
+        _busy = true;
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            await ProfilerService.StartSessionAsync(connStr, sessionName);
+            Snackbar.Add($"Session '{sessionName}' started.", Severity.Success);
+            await RefreshSessions();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ErrorSanitizer.Sanitize(ex, Logger, "StartSession"), Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task StopSession(string sessionName)
+    {
+        _busy = true;
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            await ProfilerService.StopSessionAsync(connStr, sessionName);
+            Snackbar.Add($"Session '{sessionName}' stopped.", Severity.Info);
+            await RefreshSessions();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ErrorSanitizer.Sanitize(ex, Logger, "StopSession"), Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DropSession(string sessionName)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Drop Session",
+            $"Are you sure you want to drop session '{sessionName}'? All captured events will be permanently lost.",
+            yesText: "Drop",
+            cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        _busy = true;
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            await ProfilerService.DropSessionAsync(connStr, sessionName);
+            ConfigStore.Remove(sessionName);
+            Snackbar.Add($"Session '{sessionName}' dropped.", Severity.Warning);
+            await RefreshSessions();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ErrorSanitizer.Sanitize(ex, Logger, "DropSession"), Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // ---- Create session dialog ----
+
+    private async Task OpenCreateDialog()
+    {
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false
+        };
+
+        var dialog = await DialogService.ShowAsync<CreateSessionDialog>("Create Profiling Session", options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            var started = result.Data is bool b && b;
+            var msg = started
+                ? "Session created and started."
+                : "Session created. Use the Start button to begin capture.";
+            Snackbar.Add(msg, Severity.Success);
+            await RefreshSessions();
+        }
+    }
+
+    // ---- Quick capture ----
+
+    private async Task StartQuickCapture()
+    {
+        if (string.IsNullOrWhiteSpace(_quickSessionName)) return;
+        if (!SqlInputValidator.IsValidSessionName(_quickSessionName))
+        {
+            Snackbar.Add("Session name may only contain letters, digits, underscores, and hyphens.", Severity.Warning);
+            return;
+        }
+
+        _capturing = true;
+        _quickCountdownRemaining = _quickDurationSeconds;
+        _quickProgressPct = 0;
+        _quickCaptureCts = new CancellationTokenSource();
+        var ct = _quickCaptureCts.Token;
+
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+
+            // Build quick-defaults config
+            var config = new SessionConfig
+            {
+                SessionName = _quickSessionName,
+                EventTypes = [EventType.SqlBatchCompleted, EventType.RpcCompleted],
+                ExcludePatterns = NoisePatterns.Default,
+                RingBufferMb = 50
+            };
+
+            await ProfilerService.CreateSessionAsync(connStr, config, ct);
+            ConfigStore.Set(_quickSessionName, config);
+            await ProfilerService.StartSessionAsync(connStr, _quickSessionName, ct);
+
+            await RefreshSessions();
+
+            // Countdown using a periodic timer; update UI each second
+            _countdownTimer = new Timer(_ => InvokeAsync(() =>
+            {
+                if (!_capturing) return Task.CompletedTask;
+                _quickCountdownRemaining--;
+                var elapsed = _quickDurationSeconds - _quickCountdownRemaining;
+                _quickProgressPct = (int)(elapsed * 100.0 / _quickDurationSeconds);
+                StateHasChanged();
+                return Task.CompletedTask;
+            }), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+
+            await Task.Delay(TimeSpan.FromSeconds(_quickDurationSeconds), ct);
+
+            if (_countdownTimer is not null)
+            {
+                await _countdownTimer.DisposeAsync();
+                _countdownTimer = null;
+            }
+
+            await ProfilerService.StopSessionAsync(connStr, _quickSessionName);
+            await RefreshSessions();
+
+            Snackbar.Add("Capture complete! Navigate to Analytics to view results.", Severity.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            // User pressed Cancel — stop the session if it exists
+            try
+            {
+                var connStr = ConnectionStringResolver.Resolve();
+                await ProfilerService.StopSessionAsync(connStr, _quickSessionName);
+                await RefreshSessions();
+            }
+            catch { /* best-effort */ }
+            Snackbar.Add("Quick capture cancelled.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ErrorSanitizer.Sanitize(ex, Logger, "QuickCapture"), Severity.Error);
+        }
+        finally
+        {
+            if (_countdownTimer is not null)
+            {
+                await _countdownTimer.DisposeAsync();
+                _countdownTimer = null;
+            }
+            _capturing = false;
+            _quickCountdownRemaining = 0;
+            _quickProgressPct = 0;
+            _quickCaptureCts?.Dispose();
+            _quickCaptureCts = null;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelQuickCapture()
+    {
+        _quickCaptureCts?.Cancel();
+    }
+}
