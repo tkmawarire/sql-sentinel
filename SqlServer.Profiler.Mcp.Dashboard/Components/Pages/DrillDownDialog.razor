@@ -1,0 +1,217 @@
+@using ApexCharts
+@using SqlServer.Profiler.Mcp.Models
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.QueryStats" Color="MudBlazor.Color.Primary" />
+            <MudText Typo="Typo.h6" Style="color: #e2e8f0;">Drill-Down: @GroupBy</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @* Group key *@
+            <div style="background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 14px; word-break: break-all;">
+                <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block; margin-bottom: 4px;">Group Key</MudText>
+                <code style="font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 0.8rem; color: #06b6d4;">@GroupKey</code>
+            </div>
+
+            @* Metrics *@
+            <MudGrid Spacing="2">
+                <MudItem xs="6" sm="3">
+                    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Count</MudText>
+                        <MudText Typo="Typo.h6" Style="color: #06b6d4; font-weight: 700;">@Count.ToString("N0")</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Avg Duration</MudText>
+                        <MudText Typo="Typo.h6" Style="@(GetDurationStyle(AvgDurationUs) + " font-weight: 700;")">@FormatDuration((long)AvgDurationUs)</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Max Duration</MudText>
+                        <MudText Typo="Typo.h6" Style="@(GetDurationStyle(MaxDurationUs) + " font-weight: 700;")">@FormatDuration(MaxDurationUs)</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Total Reads</MudText>
+                        <MudText Typo="Typo.h6" Style="color: #e2e8f0; font-weight: 700;">@FormatCount(TotalReads)</MudText>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+
+            @* Trend sparkline *@
+            @if (TrendPoints.Count > 0)
+            {
+                <div>
+                    <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; margin-bottom: 8px; display: block;">
+                        Performance Trend (Historical)
+                    </MudText>
+                    <MudPaper Elevation="0" Style="background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 4px;">
+                        <ApexChart TItem="QueryTrendPoint"
+                                   Title=""
+                                   Options="_sparklineOptions"
+                                   Height="100">
+                            <ApexPointSeries TItem="QueryTrendPoint"
+                                             Items="TrendPoints"
+                                             SeriesType="SeriesType.Area"
+                                             XValue="@(p => p.TimeBucket.ToString("MM/dd HH:mm"))"
+                                             YValue="@(p => (decimal)(p.AvgDurationUs / 1000.0))"
+                                             Name="Avg Duration (ms)" />
+                        </ApexChart>
+                    </MudPaper>
+                </div>
+            }
+
+            @* Sample SQL *@
+            @if (!string.IsNullOrWhiteSpace(SampleSql))
+            {
+                <div>
+                    <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; margin-bottom: 6px; display: block;">Sample SQL</MudText>
+                    <div style="background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; overflow-x: auto; max-height: 180px; overflow-y: auto;">
+                        <pre style="margin: 0; font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 0.78rem; color: #e2e8f0; white-space: pre-wrap; word-break: break-word;">@SampleSql</pre>
+                    </div>
+                </div>
+            }
+
+            @* Individual events table *@
+            @if (Events.Count > 0)
+            {
+                <div>
+                    <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; margin-bottom: 8px; display: block;">
+                        Top @Events.Count Events (by duration)
+                    </MudText>
+                    <MudPaper Elevation="0" Style="background: #020617; border: 1px solid #1e293b; border-radius: 8px; overflow: hidden; max-height: 300px; overflow-y: auto;">
+                        <MudSimpleTable Dense="true" Hover="true" Style="background: transparent;">
+                            <thead>
+                                <tr style="background: #020617;">
+                                    <th style="color: #64748b; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid #1e293b; white-space: nowrap;">Time</th>
+                                    <th style="color: #64748b; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid #1e293b;">Duration</th>
+                                    <th style="color: #64748b; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid #1e293b;">Reads</th>
+                                    <th style="color: #64748b; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid #1e293b;">Database</th>
+                                    <th style="color: #64748b; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid #1e293b;">SQL Preview</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var evt in Events)
+                                {
+                                    <tr style="border-bottom: 1px solid rgba(30,41,59,0.5);">
+                                        <td style="color: #64748b; font-family: monospace; font-size: 0.74rem; padding: 5px 12px; white-space: nowrap;">
+                                            @(evt.EventTimestamp?.ToString("HH:mm:ss.fff") ?? "—")
+                                        </td>
+                                        <td style="@GetDurationStyle(evt.DurationUs) font-family: monospace; font-size: 0.78rem; font-weight: 600; padding: 5px 12px; white-space: nowrap;">
+                                            @FormatDuration(evt.DurationUs)
+                                        </td>
+                                        <td style="color: #94a3b8; font-family: monospace; font-size: 0.74rem; padding: 5px 12px;">
+                                            @(evt.LogicalReads > 0 ? evt.LogicalReads.ToString("N0") : "—")
+                                        </td>
+                                        <td style="color: #94a3b8; font-size: 0.74rem; padding: 5px 12px;">
+                                            @(string.IsNullOrWhiteSpace(evt.DatabaseName) ? "—" : evt.DatabaseName)
+                                        </td>
+                                        <td style="color: #cbd5e1; font-family: monospace; font-size: 0.72rem; padding: 5px 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                            @TruncateSql(evt.SqlText)
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudPaper>
+                </div>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="MudBlazor.Color.Primary" OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public string GroupBy { get; set; } = "";
+    [Parameter] public string GroupKey { get; set; } = "";
+    [Parameter] public int Count { get; set; }
+    [Parameter] public double AvgDurationUs { get; set; }
+    [Parameter] public long MaxDurationUs { get; set; }
+    [Parameter] public long TotalReads { get; set; }
+    [Parameter] public string SampleSql { get; set; } = "";
+    [Parameter] public List<ProfilerEvent> Events { get; set; } = new();
+    [Parameter] public List<QueryTrendPoint> TrendPoints { get; set; } = new();
+
+    private ApexChartOptions<QueryTrendPoint> _sparklineOptions = new()
+    {
+        Chart = new Chart
+        {
+            Background = "transparent",
+            Toolbar = new Toolbar { Show = false },
+            Animations = new Animations { Enabled = false }
+        },
+        Grid = new Grid { BorderColor = "#1e293b", StrokeDashArray = 3 },
+        Colors = new List<string> { "#8b5cf6" },
+        Stroke = new Stroke { Curve = Curve.Smooth, Width = new List<int> { 2 } },
+        Fill = new Fill
+        {
+            Type = new List<FillType> { FillType.Gradient },
+            Gradient = new FillGradient
+            {
+                ShadeIntensity = 1,
+                OpacityFrom = 0.3,
+                OpacityTo = 0.02,
+                Stops = new List<double> { 0, 100 }
+            }
+        },
+        Xaxis = new XAxis
+        {
+            Labels = new XAxisLabels { Style = new AxisLabelStyle { Colors = "#64748b", FontSize = "10px" } },
+            AxisBorder = new AxisBorder { Show = false },
+            AxisTicks = new AxisTicks { Show = false }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    Style = new AxisLabelStyle { Colors = new List<string> { "#64748b" }, FontSize = "10px" }
+                }
+            }
+        },
+        Tooltip = new Tooltip { Enabled = true },
+        Markers = new Markers { Size = new List<int> { 0 } }
+    };
+
+    private void Close() => MudDialog.Close();
+
+    private static string FormatDuration(long us) => us switch
+    {
+        >= 1_000_000 => $"{us / 1_000_000.0:F2}s",
+        >= 1_000 => $"{us / 1_000.0:F1}ms",
+        0 => "—",
+        _ => $"{us}µs"
+    };
+
+    private static string GetDurationStyle(double us) => us switch
+    {
+        >= 5_000_000 => "color: #ef4444;",
+        >= 1_000_000 => "color: #f59e0b;",
+        _ => "color: #e2e8f0;"
+    };
+
+    private static string FormatCount(long n) => n switch
+    {
+        >= 1_000_000 => $"{n / 1_000_000.0:F1}M",
+        >= 1_000 => $"{n / 1_000.0:F1}K",
+        _ => n.ToString("N0")
+    };
+
+    private static string TruncateSql(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return "—";
+        var trimmed = sql.Trim().Replace("\r\n", " ").Replace("\n", " ");
+        return trimmed.Length > 90 ? trimmed[..87] + "..." : trimmed;
+    }
+}

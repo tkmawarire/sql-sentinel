@@ -1,6 +1,823 @@
 @page "/analytics"
+@using ApexCharts
+@using SqlServer.Profiler.Mcp.Tools
+@using SqlServer.Profiler.Mcp.Utilities
+@inject IProfilerService ProfilerService
+@inject ISqlParsingService SqlParser
+@inject ITrendAnalysisService TrendAnalysisService
+@inject SessionConfigStore ConfigStore
+@inject IDialogService DialogService
 
 <PageTitle>Query Analytics - SQL Sentinel</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-4" Style="font-weight: 600; color: #e2e8f0;">Query Analytics</MudText>
-<MudText Typo="Typo.body2" Style="color: #94a3b8;">Aggregated query performance analysis — coming up next.</MudText>
+{{!-- Page header --}}
+<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Query Analytics</MudText>
+        <MudText Typo="Typo.caption" Style="color: #64748b;">Aggregated query performance analysis — group, filter, and drill down</MudText>
+    </MudStack>
+
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        <MudSelect T="string"
+                   Value="_selectedSession"
+                   ValueChanged="OnSessionChanged"
+                   Placeholder="Select session..."
+                   Dense="true"
+                   Variant="Variant.Outlined"
+                   Style="min-width: 220px; background: #0f172a;"
+                   Disabled="@_loading">
+            @foreach (var s in _sessions)
+            {
+                <MudSelectItem T="string" Value="@s.SessionName">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudIcon Icon="@Icons.Material.Filled.Circle"
+                                 Size="MudBlazor.Size.Small"
+                                 Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                        <span>@s.DisplayName</span>
+                    </MudStack>
+                </MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudTooltip Text="Refresh data">
+            <MudIconButton Icon="@(_loading ? Icons.Material.Filled.HourglassTop : Icons.Material.Filled.Refresh)"
+                           Color="MudBlazor.Color.Primary"
+                           Size="MudBlazor.Size.Medium"
+                           Disabled="@(string.IsNullOrEmpty(_selectedSession) || _loading)"
+                           OnClick="LoadData"
+                           Style="background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.2); border-radius: 8px;" />
+        </MudTooltip>
+    </MudStack>
+</MudStack>
+
+{{!-- Group-by toolbar --}}
+<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 18px; margin-bottom: 12px;">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="flex-wrap: wrap; gap: 8px;">
+        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;">Group by:</MudText>
+        <MudToggleGroup T="string"
+                        Value="_groupBy"
+                        ValueChanged="OnGroupByChanged"
+                        SelectionMode="SelectionMode.SingleSelection"
+                        Color="MudBlazor.Color.Primary"
+                        Size="MudBlazor.Size.Small"
+                        Outlined="true">
+            @foreach (var opt in _groupByOptions)
+            {
+                <MudToggleItem T="string" Value="@opt.Key" Text="@opt.Value" />
+            }
+        </MudToggleGroup>
+
+        <MudDivider Vertical="true" Style="height: 24px; border-color: #1e293b;" />
+
+        {{!-- Time range pickers --}}
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="flex-wrap: wrap; gap: 8px;">
+            <MudDatePicker Date="_startDate"
+                           DateChanged="OnStartDateChanged"
+                           Placeholder="Start date"
+                           Margin="Margin.Dense"
+                           Variant="Variant.Outlined"
+                           Style="max-width: 160px; background: #020617;"
+                           Clearable="true" />
+            <MudDatePicker Date="_endDate"
+                           DateChanged="OnEndDateChanged"
+                           Placeholder="End date"
+                           Margin="Margin.Dense"
+                           Variant="Variant.Outlined"
+                           Style="max-width: 160px; background: #020617;"
+                           Clearable="true" />
+        </MudStack>
+    </MudStack>
+</MudPaper>
+
+{{!-- Metric tiles --}}
+<MudGrid Spacing="2" Class="mb-4">
+    <MudItem xs="12" sm="6" md="3">
+        <MetricTile Label="Total Events"
+                    Value="@_totalEvents.ToString("N0")"
+                    Color="#06b6d4"
+                    Subtitle="@(_selectedSession ?? "no session")" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MetricTile Label="Unique Groups"
+                    Value="@_uniqueGroups.ToString("N0")"
+                    Color="#e2e8f0"
+                    Subtitle="@($"by {_groupBy}")" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MetricTile Label="Avg Duration"
+                    Value="@_avgDurationFormatted"
+                    Color="@(_avgDurationUs >= 1_000_000 ? "#f59e0b" : "#e2e8f0")"
+                    Subtitle="across all events" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MetricTile Label="Total Reads"
+                    Value="@FormatCount(_totalReads)"
+                    Color="#e2e8f0"
+                    Subtitle="logical reads" />
+    </MudItem>
+</MudGrid>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="MudBlazor.Color.Primary" Style="border-radius: 4px; margin-bottom: 16px;" />
+}
+
+@if (!_loading && string.IsNullOrEmpty(_selectedSession))
+{
+    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 60px 20px; text-align: center; margin-bottom: 16px;">
+        <MudIcon Icon="@Icons.Material.Filled.Analytics" Style="color: #1e293b; font-size: 64px; display: block; margin: 0 auto 16px;" />
+        <MudText Typo="Typo.h6" Style="color: #334155; margin-bottom: 8px;">No session selected</MudText>
+        <MudText Typo="Typo.body2" Style="color: #475569;">Select a profiling session above to load analytics data.</MudText>
+    </MudPaper>
+}
+else if (!_loading && _rows.Count == 0 && !string.IsNullOrEmpty(_selectedSession))
+{
+    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 60px 20px; text-align: center; margin-bottom: 16px;">
+        <MudIcon Icon="@Icons.Material.Filled.SearchOff" Style="color: #1e293b; font-size: 64px; display: block; margin: 0 auto 16px;" />
+        <MudText Typo="Typo.h6" Style="color: #334155; margin-bottom: 8px;">No events found</MudText>
+        <MudText Typo="Typo.body2" Style="color: #475569;">The session "@_selectedSession" has no captured events, or the time range is too narrow.</MudText>
+    </MudPaper>
+}
+else if (_rows.Count > 0)
+{
+    @* Charts row *@
+    <MudGrid Spacing="3" Class="mb-4">
+        <MudItem xs="12" md="8">
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px 18px;">
+                <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; margin-bottom: 12px; display: block;">
+                    Execution Count Over Time
+                </MudText>
+                @if (_timeSeriesData.Count > 0)
+                {
+                    <ApexChart TItem="TimeSeriesPoint"
+                               Title=""
+                               Options="_timeSeriesOptions"
+                               Height="220">
+                        <ApexPointSeries TItem="TimeSeriesPoint"
+                                         Items="_timeSeriesData"
+                                         SeriesType="SeriesType.Area"
+                                         XValue="@(p => p.TimeBucket.ToString("HH:mm"))"
+                                         YValue="@(p => (decimal)p.Count)"
+                                         Name="Executions" />
+                    </ApexChart>
+                }
+                else
+                {
+                    <div style="height: 220px; display: flex; align-items: center; justify-content: center;">
+                        <MudText Typo="Typo.body2" Style="color: #334155;">No time-series data available</MudText>
+                    </div>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px 18px;">
+                <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; margin-bottom: 12px; display: block;">
+                    Operation Distribution
+                </MudText>
+                @if (_operationData.Count > 0)
+                {
+                    <ApexChart TItem="OperationPoint"
+                               Title=""
+                               Options="_donutOptions"
+                               Height="220">
+                        <ApexPointSeries TItem="OperationPoint"
+                                         Items="_operationData"
+                                         SeriesType="SeriesType.Donut"
+                                         XValue="@(p => p.Operation)"
+                                         YValue="@(p => (decimal)p.Count)"
+                                         Name="Operations" />
+                    </ApexChart>
+                }
+                else
+                {
+                    <div style="height: 220px; display: flex; align-items: center; justify-content: center;">
+                        <MudText Typo="Typo.body2" Style="color: #334155;">No operation data available</MudText>
+                    </div>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    @* Data grid *@
+    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+        <MudDataGrid T="AnalyticsRow"
+                     Items="@_rows"
+                     Dense="true"
+                     Hover="true"
+                     Striped="false"
+                     SortMode="SortMode.Single"
+                     RowClick="@OnRowClick"
+                     Style="background: transparent;"
+                     HeaderClass="mud-datagrid-header-custom">
+            <Columns>
+                <PropertyColumn T="AnalyticsRow" TProperty="string"
+                                Property="@(r => r.Key)"
+                                Title="@_groupBy"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;">
+                    <CellTemplate>
+                        <span style="color: #e2e8f0; font-family: monospace; font-size: 0.78rem; display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 12px;"
+                              title="@context.Item.Key">
+                            @context.Item.Key
+                        </span>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="AnalyticsRow" TProperty="int"
+                                Property="@(r => r.Count)"
+                                Title="Count"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="color: #06b6d4; font-family: monospace; font-size: 0.8rem; font-weight: 600; padding: 6px 12px;" />
+
+                <PropertyColumn T="AnalyticsRow" TProperty="string"
+                                Property="@(r => r.AvgDurationFormatted)"
+                                Title="Avg Duration"
+                                Sortable="false"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="padding: 6px 12px;">
+                    <CellTemplate>
+                        <span style="@GetDurationStyle(context.Item.AvgDurationUs); font-family: monospace; font-size: 0.8rem; font-weight: 600;">
+                            @context.Item.AvgDurationFormatted
+                        </span>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="AnalyticsRow" TProperty="string"
+                                Property="@(r => r.MaxDurationFormatted)"
+                                Title="Max Duration"
+                                Sortable="false"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="padding: 6px 12px;">
+                    <CellTemplate>
+                        <span style="@GetDurationStyle(context.Item.MaxDurationUs); font-family: monospace; font-size: 0.8rem;">
+                            @context.Item.MaxDurationFormatted
+                        </span>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="AnalyticsRow" TProperty="long"
+                                Property="@(r => r.TotalReads)"
+                                Title="Total Reads"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="color: #94a3b8; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;">
+                    <CellTemplate>
+                        @(context.Item.TotalReads > 0 ? FormatCount(context.Item.TotalReads) : "—")
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="AnalyticsRow" TProperty="long"
+                                Property="@(r => r.TotalWrites)"
+                                Title="Writes"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="color: #94a3b8; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;">
+                    <CellTemplate>
+                        @(context.Item.TotalWrites > 0 ? FormatCount(context.Item.TotalWrites) : "—")
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="AnalyticsRow" TProperty="string"
+                                Property="@(r => r.SampleSql)"
+                                Title="Sample SQL"
+                                Sortable="false"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="padding: 6px 12px;">
+                    <CellTemplate>
+                        <span style="color: #cbd5e1; font-family: monospace; font-size: 0.74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 360px;">
+                            @TruncateSql(context.Item.SampleSql)
+                        </span>
+                    </CellTemplate>
+                </PropertyColumn>
+            </Columns>
+        </MudDataGrid>
+    </MudPaper>
+}
+
+@code {
+    // ---- Inner types ----
+
+    private class AnalyticsRow
+    {
+        public string Key { get; set; } = "";
+        public int Count { get; set; }
+        public long TotalDurationUs { get; set; }
+        public double AvgDurationUs { get; set; }
+        public string AvgDurationFormatted { get; set; } = "";
+        public long MaxDurationUs { get; set; }
+        public string MaxDurationFormatted { get; set; } = "";
+        public long TotalReads { get; set; }
+        public long TotalWrites { get; set; }
+        public string SampleSql { get; set; } = "";
+    }
+
+    private class TimeSeriesPoint
+    {
+        public DateTime TimeBucket { get; set; }
+        public int Count { get; set; }
+        public double AvgDurationMs { get; set; }
+    }
+
+    private class OperationPoint
+    {
+        public string Operation { get; set; } = "";
+        public int Count { get; set; }
+    }
+
+    // ---- Group-by options ----
+
+    private static readonly Dictionary<string, string> _groupByOptions = new()
+    {
+        ["Fingerprint"] = "Fingerprint",
+        ["StoredProcedure"] = "Stored Proc",
+        ["Table"] = "Table",
+        ["Database"] = "Database",
+        ["Application"] = "Application",
+        ["Operation"] = "Operation"
+    };
+
+    // ---- State ----
+
+    private List<SessionInfo> _sessions = new();
+    private string? _selectedSession;
+    private string _groupBy = "Fingerprint";
+    private bool _loading;
+
+    private DateTime? _startDate;
+    private DateTime? _endDate;
+
+    // ---- Computed metrics ----
+
+    private List<AnalyticsRow> _rows = new();
+    private int _totalEvents;
+    private int _uniqueGroups;
+    private long _avgDurationUs;
+    private long _totalReads;
+
+    private string _avgDurationFormatted => FormatDuration(_avgDurationUs);
+
+    // ---- Chart data ----
+
+    private List<TimeSeriesPoint> _timeSeriesData = new();
+    private List<OperationPoint> _operationData = new();
+
+    // ---- Chart options ----
+
+    private ApexChartOptions<TimeSeriesPoint> _timeSeriesOptions = new()
+    {
+        Chart = new Chart
+        {
+            Background = "transparent",
+            ForeColor = "#94a3b8",
+            Toolbar = new Toolbar { Show = false },
+            Zoom = new Zoom { Enabled = false },
+            Animations = new Animations { Enabled = true, Speed = 400 }
+        },
+        Grid = new Grid
+        {
+            BorderColor = "#1e293b",
+            StrokeDashArray = 3,
+            Xaxis = new GridXAxis { Lines = new Lines { Show = false } }
+        },
+        Colors = new List<string> { "#06b6d4" },
+        Stroke = new Stroke { Curve = Curve.Smooth, Width = new List<int> { 2 } },
+        Fill = new Fill
+        {
+            Type = new List<FillType> { FillType.Gradient },
+            Gradient = new FillGradient
+            {
+                ShadeIntensity = 1,
+                OpacityFrom = 0.4,
+                OpacityTo = 0.05,
+                Stops = new List<double> { 0, 100 }
+            }
+        },
+        Xaxis = new XAxis
+        {
+            Labels = new XAxisLabels { Style = new AxisLabelStyle { Colors = "#64748b", FontSize = "11px" } },
+            AxisBorder = new AxisBorder { Show = false },
+            AxisTicks = new AxisTicks { Show = false }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    Style = new AxisLabelStyle { Colors = new List<string> { "#64748b" }, FontSize = "11px" }
+                }
+            }
+        },
+        Tooltip = new Tooltip { Enabled = true },
+        Markers = new Markers { Size = new List<int> { 0 } }
+    };
+
+    private ApexChartOptions<OperationPoint> _donutOptions = new()
+    {
+        Chart = new Chart
+        {
+            Background = "transparent",
+            Toolbar = new Toolbar { Show = false },
+            Animations = new Animations { Enabled = true, Speed = 400 }
+        },
+        Colors = new List<string> { "#06b6d4", "#8b5cf6", "#f59e0b", "#22c55e", "#ef4444", "#64748b" },
+        Legend = new Legend
+        {
+            Position = LegendPosition.Bottom,
+            Labels = new LegendLabels { Colors = new List<string> { "#94a3b8" } },
+            FontSize = "11px"
+        },
+        Tooltip = new Tooltip { Enabled = true },
+        PlotOptions = new PlotOptions
+        {
+            Pie = new PlotOptionsPie
+            {
+                Donut = new PlotOptionsDonut
+                {
+                    Size = "65%",
+                    Labels = new DonutLabels
+                    {
+                        Show = true,
+                        Total = new DonutLabelTotal { Show = true, Label = "Total", Color = "#94a3b8", FontSize = "13px" }
+                    }
+                }
+            }
+        },
+        Stroke = new Stroke { Width = new List<int> { 0 } },
+        DataLabels = new DataLabels { Style = new DataLabelsStyle { Colors = new List<string> { "#020617" } } }
+    };
+
+    // ---- Lifecycle ----
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSessionsAsync();
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            _sessions = await ProfilerService.ListSessionsAsync(connStr);
+        }
+        catch
+        {
+            _sessions = new List<SessionInfo>();
+        }
+    }
+
+    // ---- Event handlers ----
+
+    private async Task OnSessionChanged(string? session)
+    {
+        _selectedSession = session;
+        if (!string.IsNullOrEmpty(session))
+            await LoadData();
+        else
+            StateHasChanged();
+    }
+
+    private async Task OnGroupByChanged(string? groupBy)
+    {
+        _groupBy = groupBy ?? "Fingerprint";
+        if (!string.IsNullOrEmpty(_selectedSession) && _rows.Count > 0)
+        {
+            // Re-group already-loaded raw events
+            await LoadData();
+        }
+    }
+
+    private void OnStartDateChanged(DateTime? date)
+    {
+        _startDate = date;
+    }
+
+    private void OnEndDateChanged(DateTime? date)
+    {
+        _endDate = date;
+    }
+
+    // ---- Data loading ----
+
+    private async Task LoadData()
+    {
+        if (string.IsNullOrEmpty(_selectedSession))
+            return;
+
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            var config = ConfigStore.Get(_selectedSession);
+            var excludePatterns = config?.ExcludePatterns ?? NoisePatterns.Default;
+
+            var filters = new EventFilters
+            {
+                StartTime = _startDate.HasValue ? _startDate.Value.ToUniversalTime() : null,
+                EndTime = _endDate.HasValue ? _endDate.Value.AddDays(1).AddSeconds(-1).ToUniversalTime() : null
+            };
+
+            var events = await ProfilerService.GetEventsAsync(connStr, _selectedSession!, filters, excludePatterns);
+
+            _totalEvents = events.Count;
+            _rows = GroupEvents(events, _groupBy);
+            _uniqueGroups = _rows.Count;
+
+            _avgDurationUs = _totalEvents > 0
+                ? (long)events.Average(e => (double)e.DurationUs)
+                : 0;
+            _totalReads = events.Sum(e => e.LogicalReads);
+
+            BuildTimeSeriesData(events);
+
+            // Only build operation data when not already grouped by Operation
+            if (_groupBy != "Operation")
+                BuildOperationData(events);
+            else
+                _operationData = _rows.Select(r => new OperationPoint { Operation = r.Key, Count = r.Count }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _rows = new List<AnalyticsRow>();
+            _timeSeriesData = new List<TimeSeriesPoint>();
+            _operationData = new List<OperationPoint>();
+            _ = ex; // Swallow — no snackbar to avoid extra DI requirement
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ---- Grouping ----
+
+    private List<AnalyticsRow> GroupEvents(List<ProfilerEvent> events, string groupBy)
+    {
+        // key -> (count, totalDur, totalReads, totalWrites, maxDur, sample)
+        var groups = new Dictionary<string, (int count, long totalDur, long totalReads, long totalWrites, long maxDur, string sample)>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var evt in events)
+        {
+            string[] keys;
+
+            switch (groupBy)
+            {
+                case "StoredProcedure":
+                {
+                    var sps = SqlParser.ExtractStoredProcedures(evt.SqlText);
+                    keys = sps.Count > 0 ? sps.ToArray() : new[] { "(ad-hoc SQL)" };
+                    break;
+                }
+                case "Table":
+                {
+                    var tables = SqlParser.ExtractTableReferences(evt.SqlText);
+                    keys = tables.Count > 0 ? tables.ToArray() : new[] { "(no table)" };
+                    break;
+                }
+                case "Database":
+                    keys = new[] { string.IsNullOrWhiteSpace(evt.DatabaseName) ? "unknown" : evt.DatabaseName };
+                    break;
+                case "Application":
+                    keys = new[] { string.IsNullOrWhiteSpace(evt.ClientAppName) ? "unknown" : evt.ClientAppName };
+                    break;
+                case "Operation":
+                    keys = new[] { SqlParser.ClassifyOperation(evt.SqlText) };
+                    break;
+                default: // Fingerprint
+                    keys = new[] { string.IsNullOrWhiteSpace(evt.QueryFingerprint) ? "(no fingerprint)" : evt.QueryFingerprint };
+                    break;
+            }
+
+            foreach (var key in keys)
+            {
+                if (!groups.TryGetValue(key, out var acc))
+                    acc = (0, 0L, 0L, 0L, 0L, evt.SqlText);
+
+                groups[key] = (
+                    acc.count + 1,
+                    acc.totalDur + evt.DurationUs,
+                    acc.totalReads + evt.LogicalReads,
+                    acc.totalWrites + evt.Writes,
+                    Math.Max(acc.maxDur, evt.DurationUs),
+                    acc.sample
+                );
+            }
+        }
+
+        return groups
+            .Select(g =>
+            {
+                var (count, totalDur, totalReads, totalWrites, maxDur, sample) = g.Value;
+                var avgUs = count > 0 ? (double)totalDur / count : 0;
+                return new AnalyticsRow
+                {
+                    Key = g.Key,
+                    Count = count,
+                    TotalDurationUs = totalDur,
+                    AvgDurationUs = avgUs,
+                    AvgDurationFormatted = FormatDuration((long)avgUs),
+                    MaxDurationUs = maxDur,
+                    MaxDurationFormatted = FormatDuration(maxDur),
+                    TotalReads = totalReads,
+                    TotalWrites = totalWrites,
+                    SampleSql = sample
+                };
+            })
+            .OrderByDescending(r => r.TotalDurationUs)
+            .ToList();
+    }
+
+    // ---- Chart builders ----
+
+    private void BuildTimeSeriesData(List<ProfilerEvent> events)
+    {
+        var timestamped = events
+            .Where(e => e.EventTimestamp.HasValue)
+            .OrderBy(e => e.EventTimestamp!.Value)
+            .ToList();
+
+        if (timestamped.Count == 0)
+        {
+            _timeSeriesData = new List<TimeSeriesPoint>();
+            return;
+        }
+
+        var minT = timestamped.First().EventTimestamp!.Value;
+        var maxT = timestamped.Last().EventTimestamp!.Value;
+        var span = maxT - minT;
+
+        // Choose bucket size: aim for ~20 buckets, minimum 1 minute
+        var bucketMinutes = Math.Max(1, (int)Math.Ceiling(span.TotalMinutes / 20));
+
+        var buckets = new Dictionary<DateTime, (int count, long totalDur)>();
+
+        foreach (var evt in timestamped)
+        {
+            var ts = evt.EventTimestamp!.Value;
+            var bucket = new DateTime(
+                ts.Year, ts.Month, ts.Day, ts.Hour,
+                (ts.Minute / bucketMinutes) * bucketMinutes, 0, ts.Kind);
+
+            if (!buckets.TryGetValue(bucket, out var acc))
+                acc = (0, 0L);
+
+            buckets[bucket] = (acc.count + 1, acc.totalDur + evt.DurationUs);
+        }
+
+        _timeSeriesData = buckets
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new TimeSeriesPoint
+            {
+                TimeBucket = kv.Key,
+                Count = kv.Value.count,
+                AvgDurationMs = kv.Value.count > 0
+                    ? kv.Value.totalDur / (double)kv.Value.count / 1000.0
+                    : 0
+            })
+            .ToList();
+    }
+
+    private void BuildOperationData(List<ProfilerEvent> events)
+    {
+        _operationData = events
+            .GroupBy(e => SqlParser.ClassifyOperation(e.SqlText))
+            .Select(g => new OperationPoint { Operation = g.Key, Count = g.Count() })
+            .OrderByDescending(p => p.Count)
+            .ToList();
+    }
+
+    // ---- Drill-down dialog ----
+
+    private async Task OnRowClick(DataGridRowClickEventArgs<AnalyticsRow> args)
+    {
+        var row = args.Item;
+
+        // Collect the individual events for this group (up to 50)
+        List<ProfilerEvent> groupEvents = new();
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            var config = ConfigStore.Get(_selectedSession!);
+            var excludePatterns = config?.ExcludePatterns ?? NoisePatterns.Default;
+            var filters = new EventFilters
+            {
+                StartTime = _startDate.HasValue ? _startDate.Value.ToUniversalTime() : null,
+                EndTime = _endDate.HasValue ? _endDate.Value.AddDays(1).AddSeconds(-1).ToUniversalTime() : null
+            };
+
+            var allEvents = await ProfilerService.GetEventsAsync(connStr, _selectedSession!, filters, excludePatterns);
+            groupEvents = FilterEventsForRow(allEvents, row)
+                .OrderByDescending(e => e.DurationUs)
+                .Take(50)
+                .ToList();
+        }
+        catch { }
+
+        // Build trend data for fingerprint group
+        List<QueryTrendPoint> trendPoints = new();
+        if (_groupBy == "Fingerprint" && !string.IsNullOrWhiteSpace(row.Key) && row.Key != "(no fingerprint)")
+        {
+            try
+            {
+                var connStr = ConnectionStringResolver.Resolve();
+                trendPoints = await TrendAnalysisService.GetQueryTrendAsync(connStr, row.Key);
+            }
+            catch { }
+        }
+
+        var parameters = new DialogParameters<DrillDownDialog>
+        {
+            { x => x.GroupBy, _groupBy },
+            { x => x.GroupKey, row.Key },
+            { x => x.Count, row.Count },
+            { x => x.AvgDurationUs, row.AvgDurationUs },
+            { x => x.MaxDurationUs, row.MaxDurationUs },
+            { x => x.TotalReads, row.TotalReads },
+            { x => x.SampleSql, row.SampleSql },
+            { x => x.Events, groupEvents },
+            { x => x.TrendPoints, trendPoints }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = true
+        };
+
+        await DialogService.ShowAsync<DrillDownDialog>($"{_groupBy}: {TruncateKey(row.Key)}", parameters, options);
+    }
+
+    private IEnumerable<ProfilerEvent> FilterEventsForRow(List<ProfilerEvent> events, AnalyticsRow row)
+    {
+        return _groupBy switch
+        {
+            "StoredProcedure" => events.Where(e =>
+            {
+                var sps = SqlParser.ExtractStoredProcedures(e.SqlText);
+                return sps.Count > 0
+                    ? sps.Any(sp => sp.Equals(row.Key, StringComparison.OrdinalIgnoreCase))
+                    : row.Key == "(ad-hoc SQL)";
+            }),
+            "Table" => events.Where(e =>
+            {
+                var tables = SqlParser.ExtractTableReferences(e.SqlText);
+                return tables.Count > 0
+                    ? tables.Any(t => t.Equals(row.Key, StringComparison.OrdinalIgnoreCase))
+                    : row.Key == "(no table)";
+            }),
+            "Database" => events.Where(e => (e.DatabaseName ?? "unknown").Equals(row.Key, StringComparison.OrdinalIgnoreCase)),
+            "Application" => events.Where(e => (e.ClientAppName ?? "unknown").Equals(row.Key, StringComparison.OrdinalIgnoreCase)),
+            "Operation" => events.Where(e => SqlParser.ClassifyOperation(e.SqlText).Equals(row.Key, StringComparison.OrdinalIgnoreCase)),
+            _ => events.Where(e => (string.IsNullOrWhiteSpace(e.QueryFingerprint) ? "(no fingerprint)" : e.QueryFingerprint)
+                .Equals(row.Key, StringComparison.OrdinalIgnoreCase))
+        };
+    }
+
+    // ---- Formatting helpers ----
+
+    private static string FormatDuration(long us) => us switch
+    {
+        >= 1_000_000 => $"{us / 1_000_000.0:F2}s",
+        >= 1_000 => $"{us / 1_000.0:F1}ms",
+        0 => "—",
+        _ => $"{us}µs"
+    };
+
+    private static string GetDurationStyle(double us) => us switch
+    {
+        >= 5_000_000 => "color: #ef4444;",
+        >= 1_000_000 => "color: #f59e0b;",
+        _ => "color: #e2e8f0;"
+    };
+
+    private static string FormatCount(long n) => n switch
+    {
+        >= 1_000_000 => $"{n / 1_000_000.0:F1}M",
+        >= 1_000 => $"{n / 1_000.0:F1}K",
+        _ => n.ToString("N0")
+    };
+
+    private static string TruncateSql(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+            return "—";
+        var trimmed = sql.Trim().Replace("\r\n", " ").Replace("\n", " ");
+        return trimmed.Length > 110 ? trimmed[..107] + "..." : trimmed;
+    }
+
+    private static string TruncateKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return key;
+        return key.Length > 60 ? key[..57] + "..." : key;
+    }
+}
+
