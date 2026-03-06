@@ -1,0 +1,19 @@
+<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px 20px;">
+    <MudStack Spacing="1">
+        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;">@Label</MudText>
+        <MudText Typo="Typo.h5" Style="@_valueStyle">@Value</MudText>
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <MudText Typo="Typo.caption" Style="color: #64748b;">@Subtitle</MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "\u2014";
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public string? Color { get; set; }
+
+    private string _valueStyle => $"font-weight: 700; color: {Color ?? "#e2e8f0"};";
+}

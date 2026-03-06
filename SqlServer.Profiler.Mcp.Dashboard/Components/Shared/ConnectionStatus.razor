@@ -1,0 +1,28 @@
+@using SqlServer.Profiler.Mcp.Utilities
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+    <MudIcon Icon="@(_connected ? Icons.Material.Filled.Circle : Icons.Material.Outlined.Circle)"
+             Color="@(_connected ? Color.Success : Color.Error)"
+             Size="Size.Small" />
+    <MudText Typo="Typo.caption" Style="color: #94a3b8;">@_statusText</MudText>
+</MudStack>
+
+@code {
+    private bool _connected;
+    private string _statusText = "Checking...";
+
+    protected override void OnInitialized()
+    {
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            _connected = !string.IsNullOrEmpty(connStr);
+            _statusText = _connected ? "Connected" : "No connection";
+        }
+        catch
+        {
+            _connected = false;
+            _statusText = "Not configured";
+        }
+    }
+}

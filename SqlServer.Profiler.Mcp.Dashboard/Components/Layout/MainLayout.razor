@@ -1,0 +1,70 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="0" Dense="true" Style="background: #0f172a; border-bottom: 1px solid #1e293b;">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@ToggleDrawer" />
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.Shield" Size="Size.Small" Color="Color.Primary" />
+            <MudText Typo="Typo.h6" Style="font-weight: 600; letter-spacing: -0.5px;">SQL Sentinel</MudText>
+        </MudStack>
+        <MudSpacer />
+        <ConnectionStatus />
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="0" Variant="DrawerVariant.Mini"
+               OpenMiniOnHover="true"
+               Style="background: #0f172a; border-right: 1px solid #1e293b;">
+        <NavMenu />
+    </MudDrawer>
+
+    <MudMainContent Style="background: #020617; min-height: 100vh;">
+        <MudContainer MaxWidth="MaxWidth.False" Class="pa-4">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#06b6d4",
+            Secondary = "#8b5cf6",
+            Background = "#020617",
+            Surface = "#0f172a",
+            AppbarBackground = "#0f172a",
+            DrawerBackground = "#0f172a",
+            Error = "#ef4444",
+            Warning = "#f59e0b",
+            Success = "#22c55e",
+            Info = "#06b6d4",
+            TextPrimary = "#e2e8f0",
+            TextSecondary = "#94a3b8",
+            ActionDefault = "#64748b",
+            Divider = "#1e293b",
+            TableHover = "rgba(6, 182, 212, 0.04)",
+            TableStriped = "rgba(6, 182, 212, 0.02)",
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = new[] { "Inter", "sans-serif" }
+            },
+            H6 = new H6Typography
+            {
+                FontFamily = new[] { "Inter", "sans-serif" }
+            }
+        }
+    };
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+}

@@ -2,6 +2,8 @@
   <Project Path="SqlServer.Profiler.Mcp.Api/SqlServer.Profiler.Mcp.Api.csproj" />
   <Project Path="SqlServer.Profiler.Mcp.Cli/SqlServer.Profiler.Mcp.Cli.csproj" />
   <Project Path="SqlServer.Profiler.Mcp/SqlServer.Profiler.Mcp.csproj" />
+  <Project Path="SqlServer.Profiler.Mcp.Dashboard/SqlServer.Profiler.Mcp.Dashboard.csproj" />
   <Project Path="SqlServer.Profiler.Mcp.Tests/SqlServer.Profiler.Mcp.Tests.csproj" />
+  <Folder Name="/vars/" />
   <Project Path="SqlServer.Profiler.Mcp.Api.Tests/SqlServer.Profiler.Mcp.Api.Tests.csproj" />
 </Solution>
