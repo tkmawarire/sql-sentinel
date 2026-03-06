@@ -1,6 +1,1411 @@
 @page "/diagnostics"
+@using ApexCharts
+@using SqlServer.Profiler.Mcp.Utilities
+@inject IProfilerService ProfilerService
+@inject IWaitStatsService WaitStatsService
+@inject ITrendAnalysisService TrendAnalysisService
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
 
 <PageTitle>Diagnostics - SQL Sentinel</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-4" Style="font-weight: 600; color: #e2e8f0;">Diagnostics</MudText>
-<MudText Typo="Typo.body2" Style="color: #94a3b8;">Health checks, deadlocks, blocking, and wait stats — coming up next.</MudText>
+{{!-- Page header --}}
+<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Diagnostics</MudText>
+        <MudText Typo="Typo.caption" Style="color: #64748b;">Health overview, deadlocks, blocking analysis, wait stats, and anomaly detection</MudText>
+    </MudStack>
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+        <MudIcon Icon="@Icons.Material.Filled.Circle"
+                 Style="@(_diagHub?.State == HubConnectionState.Connected ? "color: #22c55e; font-size: 10px;" : "color: #ef4444; font-size: 10px;")" />
+        <MudText Typo="Typo.caption" Style="color: #64748b;">
+            @(_diagHub?.State == HubConnectionState.Connected ? "Live" : "Disconnected")
+        </MudText>
+    </MudStack>
+</MudStack>
+
+<MudTabs Elevation="0"
+         Rounded="false"
+         ApplyEffectsToContainer="true"
+         PanelClass="pt-4"
+         Style="background: transparent;"
+         TabHeaderClass="mud-tabs-header-custom"
+         ActivePanelIndexChanged="OnTabChanged">
+
+    {{!-- ==================== TAB 1: HEALTH OVERVIEW ==================== --}}
+    <MudTabPanel Text="Health Overview" Icon="@Icons.Material.Filled.MonitorHeart">
+
+        {{!-- Session selector + refresh --}}
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-4" Style="flex-wrap: wrap; gap: 8px;">
+            <MudSelect T="string"
+                       Value="_healthSession"
+                       ValueChanged="OnHealthSessionChanged"
+                       Placeholder="Select session..."
+                       Dense="true"
+                       Variant="Variant.Outlined"
+                       Style="min-width: 220px; background: #0f172a;"
+                       Disabled="@_healthLoading">
+                @foreach (var s in _sessions)
+                {
+                    <MudSelectItem T="string" Value="@s.SessionName">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                            <MudIcon Icon="@Icons.Material.Filled.Circle"
+                                     Size="MudBlazor.Size.Small"
+                                     Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                            <span>@s.DisplayName</span>
+                        </MudStack>
+                    </MudSelectItem>
+                }
+            </MudSelect>
+            <MudTooltip Text="Refresh health check">
+                <MudIconButton Icon="@(_healthLoading ? Icons.Material.Filled.HourglassTop : Icons.Material.Filled.Refresh)"
+                               Color="MudBlazor.Color.Primary"
+                               Size="MudBlazor.Size.Medium"
+                               Disabled="@(string.IsNullOrEmpty(_healthSession) || _healthLoading)"
+                               OnClick="LoadHealthAsync"
+                               Style="background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.2); border-radius: 8px;" />
+            </MudTooltip>
+        </MudStack>
+
+        @if (_healthLoading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="MudBlazor.Color.Primary" Style="border-radius: 4px; margin-bottom: 16px;" />
+        }
+
+        {{!-- Metric tiles --}}
+        <MudGrid Spacing="2" Class="mb-4">
+            <MudItem xs="12" sm="6" md="3">
+                <MetricTile Label="Active Blocking"
+                            Value="@(_activeBlocking.Count.ToString())"
+                            Color="@(_activeBlocking.Count > 0 ? "#ef4444" : "#22c55e")"
+                            Subtitle="@(_activeBlocking.Count > 0 ? "Blocking detected!" : "No blocking")" />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MetricTile Label="Recent Deadlocks"
+                            Value="@(_healthDeadlocks.Count.ToString())"
+                            Color="@(_healthDeadlocks.Count > 0 ? "#f59e0b" : "#22c55e")"
+                            Subtitle="@(_healthSession ?? "no session")" />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MetricTile Label="Top Wait Category"
+                            Value="@_topWaitCategory"
+                            Color="#8b5cf6"
+                            Subtitle="by total wait time" />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MetricTile Label="Server Health"
+                            Value="@_serverHealth"
+                            Color="@_serverHealthColor"
+                            Subtitle="@_healthInsightSummary" />
+            </MudItem>
+        </MudGrid>
+
+        @if (string.IsNullOrEmpty(_healthSession) && !_healthLoading)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 60px 20px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Style="color: #1e293b; font-size: 64px; display: block; margin: 0 auto 16px;" />
+                <MudText Typo="Typo.h6" Style="color: #334155; margin-bottom: 8px;">Select a session to run health check</MudText>
+                <MudText Typo="Typo.body2" Style="color: #475569;">Choose a profiling session above to load deadlock and blocking data.</MudText>
+            </MudPaper>
+        }
+        else if (_healthInsights.Count > 0)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px 20px;">
+                <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; margin-bottom: 12px; display: block;">
+                    Health Insights
+                </MudText>
+                <MudList T="HealthInsight" Dense="true" Style="background: transparent;">
+                    @foreach (var insight in _healthInsights)
+                    {
+                        <MudListItem T="HealthInsight" Style="border-bottom: 1px solid #1e293b; padding: 10px 0;">
+                            <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
+                                <MudIcon Icon="@Icons.Material.Filled.Circle"
+                                         Style="@GetInsightDotStyle(insight.Severity)" />
+                                <MudStack Spacing="0" Style="flex: 1; min-width: 0;">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Style="flex-wrap: wrap; gap: 4px;">
+                                        <span style="background: @GetCategoryBg(insight.Category); color: @GetCategoryColor(insight.Category); border-radius: 4px; padding: 1px 7px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;">
+                                            @insight.Category
+                                        </span>
+                                        <MudText Typo="Typo.body2" Style="color: #e2e8f0; font-weight: 500;">@insight.Message</MudText>
+                                    </MudStack>
+                                    @if (!string.IsNullOrEmpty(insight.Detail))
+                                    {
+                                        <MudText Typo="Typo.caption" Style="color: #64748b; margin-top: 2px;">@insight.Detail</MudText>
+                                    }
+                                </MudStack>
+                            </MudStack>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        }
+        else if (!string.IsNullOrEmpty(_healthSession) && !_healthLoading)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 40px 20px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="color: #22c55e; font-size: 48px; display: block; margin: 0 auto 12px;" />
+                <MudText Typo="Typo.h6" Style="color: #22c55e; margin-bottom: 4px;">No issues detected</MudText>
+                <MudText Typo="Typo.body2" Style="color: #64748b;">Server appears healthy for session "@_healthSession".</MudText>
+            </MudPaper>
+        }
+    </MudTabPanel>
+
+    {{!-- ==================== TAB 2: DEADLOCKS ==================== --}}
+    <MudTabPanel Text="Deadlocks" Icon="@Icons.Material.Filled.SyncProblem">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-4" Style="flex-wrap: wrap; gap: 8px;">
+            <MudSelect T="string"
+                       Value="_deadlockSession"
+                       ValueChanged="OnDeadlockSessionChanged"
+                       Placeholder="Select session..."
+                       Dense="true"
+                       Variant="Variant.Outlined"
+                       Style="min-width: 220px; background: #0f172a;"
+                       Disabled="@_deadlockLoading">
+                @foreach (var s in _sessions)
+                {
+                    <MudSelectItem T="string" Value="@s.SessionName">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                            <MudIcon Icon="@Icons.Material.Filled.Circle"
+                                     Size="MudBlazor.Size.Small"
+                                     Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                            <span>@s.DisplayName</span>
+                        </MudStack>
+                    </MudSelectItem>
+                }
+            </MudSelect>
+            <MudTooltip Text="Refresh deadlocks">
+                <MudIconButton Icon="@(_deadlockLoading ? Icons.Material.Filled.HourglassTop : Icons.Material.Filled.Refresh)"
+                               Color="MudBlazor.Color.Primary"
+                               Size="MudBlazor.Size.Medium"
+                               Disabled="@(string.IsNullOrEmpty(_deadlockSession) || _deadlockLoading)"
+                               OnClick="LoadDeadlocksAsync"
+                               Style="background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.2); border-radius: 8px;" />
+            </MudTooltip>
+            @if (_deadlocks.Count > 0)
+            {
+                <MudChip T="string" Style="background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.25);" Size="MudBlazor.Size.Small">
+                    @_deadlocks.Count deadlock@(_deadlocks.Count != 1 ? "s" : "") found
+                </MudChip>
+            }
+        </MudStack>
+
+        @if (_deadlockLoading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="MudBlazor.Color.Primary" Style="border-radius: 4px; margin-bottom: 16px;" />
+        }
+
+        @if (string.IsNullOrEmpty(_deadlockSession) && !_deadlockLoading)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 60px 20px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.SyncProblem" Style="color: #1e293b; font-size: 64px; display: block; margin: 0 auto 16px;" />
+                <MudText Typo="Typo.h6" Style="color: #334155; margin-bottom: 8px;">Select a session</MudText>
+                <MudText Typo="Typo.body2" Style="color: #475569;">Choose a session that captures deadlock events (xml_deadlock_report).</MudText>
+            </MudPaper>
+        }
+        else if (!_deadlockLoading && _deadlocks.Count == 0 && !string.IsNullOrEmpty(_deadlockSession))
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 40px 20px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="color: #22c55e; font-size: 48px; display: block; margin: 0 auto 12px;" />
+                <MudText Typo="Typo.h6" Style="color: #22c55e; margin-bottom: 4px;">No deadlocks detected</MudText>
+                <MudText Typo="Typo.body2" Style="color: #64748b;">Session "@_deadlockSession" has no deadlock events in its ring buffer.</MudText>
+            </MudPaper>
+        }
+        else
+        {
+            <MudStack Spacing="3">
+                @foreach (var deadlock in _deadlocks)
+                {
+                    <MudCard Elevation="0" Style="background: #0f172a; border: 1px solid rgba(239,68,68,0.3); border-radius: 12px; overflow: hidden;">
+                        <MudCardHeader Style="background: rgba(239,68,68,0.06); border-bottom: 1px solid rgba(239,68,68,0.2); padding: 12px 16px;">
+                            <CardHeaderAvatar>
+                                <MudIcon Icon="@Icons.Material.Filled.SyncProblem" Style="color: #ef4444;" />
+                            </CardHeaderAvatar>
+                            <CardHeaderContent>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="flex-wrap: wrap; gap: 6px;">
+                                    <MudText Typo="Typo.body2" Style="color: #94a3b8; font-family: monospace;">
+                                        @(deadlock.EventTimestamp.HasValue ? deadlock.EventTimestamp.Value.ToString("yyyy-MM-dd HH:mm:ss.fff") : "—")
+                                    </MudText>
+                                    <MudChip T="string"
+                                             Size="MudBlazor.Size.Small"
+                                             Style="background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); height: 22px;">
+                                        Victim SPID: @deadlock.VictimSpid
+                                    </MudChip>
+                                    <MudChip T="string"
+                                             Size="MudBlazor.Size.Small"
+                                             Style="background: rgba(6,182,212,0.1); color: #06b6d4; border: 1px solid rgba(6,182,212,0.2); height: 22px;">
+                                        @deadlock.Processes.Count process@(deadlock.Processes.Count != 1 ? "es" : "")
+                                    </MudChip>
+                                </MudStack>
+                            </CardHeaderContent>
+                        </MudCardHeader>
+                        <MudCardContent Style="padding: 16px;">
+                            @foreach (var proc in deadlock.Processes)
+                            {
+                                <MudPaper Elevation="0"
+                                          Style="@($"background: {(proc.IsVictim ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)")}; border: 1px solid {(proc.IsVictim ? "rgba(239,68,68,0.25)" : "#1e293b")}; border-radius: 8px; padding: 12px; margin-bottom: 10px;")">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-2" Style="flex-wrap: wrap; gap: 6px;">
+                                        @if (proc.IsVictim)
+                                        {
+                                            <MudChip T="string" Size="MudBlazor.Size.Small"
+                                                     Style="background: rgba(239,68,68,0.2); color: #ef4444; border: 1px solid rgba(239,68,68,0.4); height: 20px; font-size: 0.68rem; font-weight: 700;">
+                                                VICTIM
+                                            </MudChip>
+                                        }
+                                        <MudText Typo="Typo.body2" Style="color: #e2e8f0; font-weight: 600;">SPID @proc.Spid</MudText>
+                                        @if (!string.IsNullOrEmpty(proc.LoginName))
+                                        {
+                                            <MudText Typo="Typo.caption" Style="color: #64748b;">@proc.LoginName</MudText>
+                                        }
+                                        @if (!string.IsNullOrEmpty(proc.HostName))
+                                        {
+                                            <MudText Typo="Typo.caption" Style="color: #64748b;">@@&nbsp;@proc.HostName</MudText>
+                                        }
+                                        @if (!string.IsNullOrEmpty(proc.ApplicationName))
+                                        {
+                                            <MudText Typo="Typo.caption" Style="color: #64748b;">[@proc.ApplicationName]</MudText>
+                                        }
+                                    </MudStack>
+                                    <MudGrid Spacing="2">
+                                        <MudItem xs="12" sm="6" md="3">
+                                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem;">Database</MudText>
+                                            <MudText Typo="Typo.body2" Style="color: #94a3b8;">@(proc.DatabaseName ?? "—")</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" sm="6" md="3">
+                                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem;">Lock Mode</MudText>
+                                            <MudText Typo="Typo.body2" Style="color: #f59e0b; font-family: monospace;">@(proc.LockMode ?? "—")</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" sm="6" md="3">
+                                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem;">Wait Resource</MudText>
+                                            <MudText Typo="Typo.body2" Style="color: #94a3b8; font-family: monospace; font-size: 0.78rem; word-break: break-all;">@(proc.WaitResource ?? "—")</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" sm="6" md="3">
+                                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem;">Wait Time</MudText>
+                                            <MudText Typo="Typo.body2" Style="color: #94a3b8; font-family: monospace;">@(proc.WaitTime > 0 ? $"{proc.WaitTime:N0} ms" : "—")</MudText>
+                                        </MudItem>
+                                    </MudGrid>
+                                    @if (!string.IsNullOrWhiteSpace(proc.SqlText))
+                                    {
+                                        <div style="margin-top: 10px; background: #020617; border: 1px solid #1e293b; border-radius: 6px; padding: 10px 12px; overflow-x: auto;">
+                                            <pre style="margin: 0; font-family: monospace; font-size: 0.75rem; color: #cbd5e1; white-space: pre-wrap; word-break: break-word;">@proc.SqlText.Trim()</pre>
+                                        </div>
+                                    }
+                                </MudPaper>
+                            }
+                        </MudCardContent>
+                    </MudCard>
+                }
+            </MudStack>
+        }
+    </MudTabPanel>
+
+    {{!-- ==================== TAB 3: BLOCKING ==================== --}}
+    <MudTabPanel Text="Blocking" Icon="@Icons.Material.Filled.Block">
+
+        {{!-- Section 1: Active Blocking (Live) --}}
+        <MudText Typo="Typo.subtitle2" Style="color: #06b6d4; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; margin-bottom: 10px; display: block;">
+            Active Blocking (Live — updates every 5s)
+        </MudText>
+
+        @if (_activeBlocking.Count == 0)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 28px 20px; text-align: center; margin-bottom: 24px;">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="color: #22c55e; font-size: 36px; display: block; margin: 0 auto 8px;" />
+                <MudText Typo="Typo.body2" Style="color: #22c55e; font-weight: 600;">No active blocking</MudText>
+                <MudText Typo="Typo.caption" Style="color: #64748b; margin-top: 4px; display: block;">All sessions are running freely.</MudText>
+            </MudPaper>
+        }
+        else
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid rgba(239,68,68,0.3); border-radius: 12px; overflow: hidden; margin-bottom: 24px;">
+                <MudDataGrid T="ActiveBlockingInfo"
+                             Items="@_activeBlocking"
+                             Dense="true"
+                             Hover="true"
+                             SortMode="SortMode.Single"
+                             Style="background: transparent;"
+                             HeaderClass="mud-datagrid-header-custom">
+                    <Columns>
+                        <PropertyColumn T="ActiveBlockingInfo" TProperty="int"
+                                        Property="@(b => b.BlockedSpid)"
+                                        Title="Blocked SPID"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #ef4444; font-family: monospace; font-weight: 700; font-size: 0.82rem; padding: 6px 12px;" />
+                        <PropertyColumn T="ActiveBlockingInfo" TProperty="int"
+                                        Property="@(b => b.BlockingSpid)"
+                                        Title="Blocking SPID"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #f59e0b; font-family: monospace; font-weight: 700; font-size: 0.82rem; padding: 6px 12px;" />
+                        <PropertyColumn T="ActiveBlockingInfo" TProperty="string"
+                                        Property="@(b => b.WaitType ?? "—")"
+                                        Title="Wait Type"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #8b5cf6; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;" />
+                        <PropertyColumn T="ActiveBlockingInfo" TProperty="long"
+                                        Property="@(b => b.WaitTimeMs)"
+                                        Title="Wait Time"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="padding: 6px 12px;">
+                            <CellTemplate>
+                                <span style="color: @(context.Item.WaitTimeMs >= 5000 ? "#ef4444" : context.Item.WaitTimeMs >= 1000 ? "#f59e0b" : "#94a3b8"); font-family: monospace; font-size: 0.8rem; font-weight: 600;">
+                                    @FormatMs(context.Item.WaitTimeMs)
+                                </span>
+                            </CellTemplate>
+                        </PropertyColumn>
+                        <PropertyColumn T="ActiveBlockingInfo" TProperty="string"
+                                        Property="@(b => b.BlockedDatabase ?? "—")"
+                                        Title="Database"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #94a3b8; font-size: 0.78rem; padding: 6px 12px;" />
+                        <PropertyColumn T="ActiveBlockingInfo" TProperty="string"
+                                        Property="@(b => b.BlockedSqlText ?? "—")"
+                                        Title="SQL Preview"
+                                        Sortable="false"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="padding: 6px 12px;">
+                            <CellTemplate>
+                                <span style="color: #cbd5e1; font-family: monospace; font-size: 0.74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 340px;">
+                                    @TruncateSql(context.Item.BlockedSqlText)
+                                </span>
+                            </CellTemplate>
+                        </PropertyColumn>
+                    </Columns>
+                </MudDataGrid>
+            </MudPaper>
+        }
+
+        {{!-- Section 2: Historical Blocking --}}
+        <MudText Typo="Typo.subtitle2" Style="color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; margin-bottom: 10px; display: block;">
+            Historical Blocking Events
+        </MudText>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-3" Style="flex-wrap: wrap; gap: 8px;">
+            <MudSelect T="string"
+                       Value="_blockingSession"
+                       ValueChanged="OnBlockingSessionChanged"
+                       Placeholder="Select session..."
+                       Dense="true"
+                       Variant="Variant.Outlined"
+                       Style="min-width: 220px; background: #0f172a;"
+                       Disabled="@_blockingLoading">
+                @foreach (var s in _sessions)
+                {
+                    <MudSelectItem T="string" Value="@s.SessionName">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                            <MudIcon Icon="@Icons.Material.Filled.Circle"
+                                     Size="MudBlazor.Size.Small"
+                                     Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                            <span>@s.DisplayName</span>
+                        </MudStack>
+                    </MudSelectItem>
+                }
+            </MudSelect>
+            <MudTooltip Text="Refresh blocking history">
+                <MudIconButton Icon="@(_blockingLoading ? Icons.Material.Filled.HourglassTop : Icons.Material.Filled.Refresh)"
+                               Color="MudBlazor.Color.Primary"
+                               Size="MudBlazor.Size.Medium"
+                               Disabled="@(string.IsNullOrEmpty(_blockingSession) || _blockingLoading)"
+                               OnClick="LoadBlockingAsync"
+                               Style="background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.2); border-radius: 8px;" />
+            </MudTooltip>
+        </MudStack>
+
+        @if (_blockingLoading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="MudBlazor.Color.Primary" Style="border-radius: 4px; margin-bottom: 16px;" />
+        }
+
+        @if (!_blockingLoading && string.IsNullOrEmpty(_blockingSession))
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 40px 20px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.Block" Style="color: #1e293b; font-size: 48px; display: block; margin: 0 auto 12px;" />
+                <MudText Typo="Typo.body1" Style="color: #334155;">Select a session to load historical blocking events.</MudText>
+            </MudPaper>
+        }
+        else if (!_blockingLoading && _blockingEvents.Count == 0 && !string.IsNullOrEmpty(_blockingSession))
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 40px 20px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="color: #22c55e; font-size: 36px; display: block; margin: 0 auto 10px;" />
+                <MudText Typo="Typo.body2" Style="color: #22c55e;">No historical blocking events in "@_blockingSession".</MudText>
+            </MudPaper>
+        }
+        else if (_blockingEvents.Count > 0)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+                <MudDataGrid T="BlockingEvent"
+                             Items="@_blockingEvents"
+                             Dense="true"
+                             Hover="true"
+                             SortMode="SortMode.Single"
+                             Style="background: transparent;"
+                             HeaderClass="mud-datagrid-header-custom">
+                    <Columns>
+                        <PropertyColumn T="BlockingEvent" TProperty="string"
+                                        Property="@(b => b.EventTimestamp.HasValue ? b.EventTimestamp.Value.ToString("HH:mm:ss.fff") : "—")"
+                                        Title="Time"
+                                        Sortable="false"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #64748b; font-family: monospace; font-size: 0.78rem; white-space: nowrap; padding: 6px 12px;" />
+                        <PropertyColumn T="BlockingEvent" TProperty="int"
+                                        Property="@(b => b.BlockedProcess.Spid)"
+                                        Title="Blocked SPID"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #ef4444; font-family: monospace; font-weight: 700; padding: 6px 12px;" />
+                        <PropertyColumn T="BlockingEvent" TProperty="int"
+                                        Property="@(b => b.BlockingProcess.Spid)"
+                                        Title="Blocking SPID"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #f59e0b; font-family: monospace; font-weight: 700; padding: 6px 12px;" />
+                        <PropertyColumn T="BlockingEvent" TProperty="string"
+                                        Property="@(b => b.BlockedProcess.WaitResource ?? "—")"
+                                        Title="Wait Resource"
+                                        Sortable="false"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #94a3b8; font-family: monospace; font-size: 0.76rem; padding: 6px 12px;" />
+                        <PropertyColumn T="BlockingEvent" TProperty="int"
+                                        Property="@(b => b.BlockedProcess.WaitTimeMs)"
+                                        Title="Wait Time"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="padding: 6px 12px;">
+                            <CellTemplate>
+                                <span style="color: @(context.Item.BlockedProcess.WaitTimeMs >= 5000 ? "#ef4444" : context.Item.BlockedProcess.WaitTimeMs >= 1000 ? "#f59e0b" : "#94a3b8"); font-family: monospace; font-size: 0.8rem; font-weight: 600;">
+                                    @FormatMs(context.Item.BlockedProcess.WaitTimeMs)
+                                </span>
+                            </CellTemplate>
+                        </PropertyColumn>
+                        <PropertyColumn T="BlockingEvent" TProperty="string"
+                                        Property="@(b => b.BlockedProcess.DatabaseName ?? "—")"
+                                        Title="Database"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #94a3b8; font-size: 0.78rem; padding: 6px 12px;" />
+                    </Columns>
+                </MudDataGrid>
+            </MudPaper>
+        }
+    </MudTabPanel>
+
+    {{!-- ==================== TAB 4: WAIT STATS ==================== --}}
+    <MudTabPanel Text="Wait Stats" Icon="@Icons.Material.Filled.Timer">
+
+        @if (_waitStats.Count == 0)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 60px 20px; text-align: center; margin-bottom: 16px;">
+                <MudProgressCircular Indeterminate="true" Color="MudBlazor.Color.Primary" Size="MudBlazor.Size.Medium" Style="display: block; margin: 0 auto 16px;" />
+                <MudText Typo="Typo.body2" Style="color: #64748b;">Waiting for wait stats from server...</MudText>
+                <MudText Typo="Typo.caption" Style="color: #475569; margin-top: 4px; display: block;">Data arrives via SignalR every 5 seconds.</MudText>
+            </MudPaper>
+        }
+        else
+        {
+            @* Charts row *@
+            <MudGrid Spacing="3" Class="mb-4">
+                @* Donut chart: by category *@
+                <MudItem xs="12" md="4">
+                    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px 18px;">
+                        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; margin-bottom: 12px; display: block;">
+                            Wait Time by Category
+                        </MudText>
+                        @if (_categoryChartData.Count > 0)
+                        {
+                            <ApexChart TItem="WaitCategoryPoint"
+                                       Title=""
+                                       Options="_donutOptions"
+                                       Height="260">
+                                <ApexPointSeries TItem="WaitCategoryPoint"
+                                                 Items="_categoryChartData"
+                                                 SeriesType="SeriesType.Donut"
+                                                 XValue="@(p => p.Category)"
+                                                 YValue="@(p => (decimal)p.WaitTimeMs)"
+                                                 Name="Wait Time (ms)" />
+                            </ApexChart>
+                        }
+                    </MudPaper>
+                </MudItem>
+
+                @* Bar chart: top 20 wait types *@
+                <MudItem xs="12" md="8">
+                    <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px 18px;">
+                        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; margin-bottom: 12px; display: block;">
+                            Top 20 Wait Types by Wait Time
+                        </MudText>
+                        @if (_topWaitData.Count > 0)
+                        {
+                            <ApexChart TItem="WaitTypePoint"
+                                       Title=""
+                                       Options="_barOptions"
+                                       Height="260">
+                                <ApexPointSeries TItem="WaitTypePoint"
+                                                 Items="_topWaitData"
+                                                 SeriesType="SeriesType.Bar"
+                                                 XValue="@(p => p.WaitType)"
+                                                 YValue="@(p => (decimal)p.WaitTimeMs)"
+                                                 Name="Wait Time (ms)" />
+                            </ApexChart>
+                        }
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+
+            @* Full data grid *@
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+                <MudDataGrid T="WaitStatEntry"
+                             Items="@_waitStats"
+                             Dense="true"
+                             Hover="true"
+                             SortMode="SortMode.Single"
+                             Style="background: transparent;"
+                             HeaderClass="mud-datagrid-header-custom">
+                    <Columns>
+                        <PropertyColumn T="WaitStatEntry" TProperty="string"
+                                        Property="@(w => w.WaitType)"
+                                        Title="Wait Type"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #e2e8f0; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;" />
+                        <PropertyColumn T="WaitStatEntry" TProperty="string"
+                                        Property="@(w => w.WaitCategory)"
+                                        Title="Category"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="padding: 6px 12px;">
+                            <CellTemplate>
+                                <span style="background: @GetWaitCategoryBg(context.Item.WaitCategory); color: @GetWaitCategoryColor(context.Item.WaitCategory); border-radius: 4px; padding: 2px 8px; font-size: 0.7rem; font-weight: 700;">
+                                    @context.Item.WaitCategory
+                                </span>
+                            </CellTemplate>
+                        </PropertyColumn>
+                        <PropertyColumn T="WaitStatEntry" TProperty="long"
+                                        Property="@(w => w.WaitingTasksCount)"
+                                        Title="Tasks Count"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #06b6d4; font-family: monospace; font-size: 0.8rem; font-weight: 600; padding: 6px 12px;" />
+                        <PropertyColumn T="WaitStatEntry" TProperty="string"
+                                        Property="@(w => w.WaitTimeFormatted)"
+                                        Title="Wait Time"
+                                        Sortable="false"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #f59e0b; font-family: monospace; font-size: 0.8rem; font-weight: 600; padding: 6px 12px;" />
+                        <PropertyColumn T="WaitStatEntry" TProperty="string"
+                                        Property="@(w => w.MaxWaitTimeFormatted)"
+                                        Title="Max Wait"
+                                        Sortable="false"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #ef4444; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;" />
+                        <PropertyColumn T="WaitStatEntry" TProperty="long"
+                                        Property="@(w => w.SignalWaitTimeMs)"
+                                        Title="Signal Wait (ms)"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #94a3b8; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;" />
+                    </Columns>
+                </MudDataGrid>
+            </MudPaper>
+        }
+    </MudTabPanel>
+
+    {{!-- ==================== TAB 5: ANOMALIES ==================== --}}
+    <MudTabPanel Text="Anomalies" Icon="@Icons.Material.Filled.TravelExplore">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-4" Style="flex-wrap: wrap; gap: 8px;">
+            <MudSelect T="string"
+                       Value="_anomalySession"
+                       ValueChanged="@(s => { _anomalySession = s; StateHasChanged(); })"
+                       Placeholder="Select session..."
+                       Dense="true"
+                       Variant="Variant.Outlined"
+                       Style="min-width: 220px; background: #0f172a;"
+                       Disabled="@_anomalyLoading">
+                @foreach (var s in _sessions)
+                {
+                    <MudSelectItem T="string" Value="@s.SessionName">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                            <MudIcon Icon="@Icons.Material.Filled.Circle"
+                                     Size="MudBlazor.Size.Small"
+                                     Style="@(s.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                            <span>@s.DisplayName</span>
+                        </MudStack>
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudButton Variant="Variant.Filled"
+                       StartIcon="@Icons.Material.Filled.TravelExplore"
+                       Style="background: rgba(139,92,246,0.15); border: 1px solid rgba(139,92,246,0.35); color: #a78bfa; border-radius: 8px;"
+                       Disabled="@(string.IsNullOrEmpty(_anomalySession) || _anomalyLoading)"
+                       OnClick="RunAnomalyDetectionAsync">
+                @if (_anomalyLoading)
+                {
+                    <MudProgressCircular Size="MudBlazor.Size.Small" Indeterminate="true" Style="margin-right: 8px; color: #a78bfa;" />
+                    <span>Detecting...</span>
+                }
+                else
+                {
+                    <span>Run Anomaly Detection</span>
+                }
+            </MudButton>
+        </MudStack>
+
+        {{!-- Threshold slider --}}
+        <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 20px; margin-bottom: 16px;">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+                <MudText Typo="Typo.caption" Style="color: #64748b; white-space: nowrap;">Deviation Threshold:</MudText>
+                <MudSlider T="double"
+                           @bind-Value="_anomalyThreshold"
+                           Min="1.5"
+                           Max="5.0"
+                           Step="0.1"
+                           Style="flex: 1; min-width: 160px;"
+                           Color="MudBlazor.Color.Secondary" />
+                <MudText Typo="Typo.body2" Style="color: #a78bfa; font-family: monospace; font-weight: 700; white-space: nowrap; min-width: 36px;">
+                    @_anomalyThreshold.ToString("F1")x
+                </MudText>
+            </MudStack>
+            <MudText Typo="Typo.caption" Style="color: #475569; margin-top: 4px; display: block;">
+                Queries deviating more than @_anomalyThreshold.ToString("F1")x from their historical average will be flagged.
+            </MudText>
+        </MudPaper>
+
+        @if (!_anomalyRan)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 60px 20px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Style="color: #1e293b; font-size: 64px; display: block; margin: 0 auto 16px;" />
+                <MudText Typo="Typo.h6" Style="color: #334155; margin-bottom: 8px;">No scan run yet</MudText>
+                <MudText Typo="Typo.body2" Style="color: #475569;">Select a session and click "Run Anomaly Detection" to scan for performance regressions.</MudText>
+                <MudText Typo="Typo.caption" Style="color: #334155; margin-top: 10px; display: block;">
+                    Note: Anomaly detection requires historical data captured by the memory service. Sessions with few events may show no results.
+                </MudText>
+            </MudPaper>
+        }
+        else if (_anomalies.Count == 0)
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 40px 20px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="color: #22c55e; font-size: 48px; display: block; margin: 0 auto 12px;" />
+                <MudText Typo="Typo.h6" Style="color: #22c55e; margin-bottom: 4px;">No anomalies detected</MudText>
+                <MudText Typo="Typo.body2" Style="color: #64748b;">
+                    All queries are performing within @_anomalyThreshold.ToString("F1")x of their historical baseline.
+                </MudText>
+                <MudText Typo="Typo.caption" Style="color: #334155; margin-top: 10px; display: block;">
+                    Note: Results require historical memory data. If you see no anomalies with little history, capture more sessions first.
+                </MudText>
+            </MudPaper>
+        }
+        else
+        {
+            <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+                <MudDataGrid T="AnomalyResult"
+                             Items="@_anomalies"
+                             Dense="true"
+                             Hover="true"
+                             SortMode="SortMode.Single"
+                             Style="background: transparent;"
+                             HeaderClass="mud-datagrid-header-custom">
+                    <Columns>
+                        <PropertyColumn T="AnomalyResult" TProperty="string"
+                                        Property="@(a => a.QueryFingerprint)"
+                                        Title="Fingerprint"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="padding: 6px 12px;">
+                            <CellTemplate>
+                                <span style="color: #cbd5e1; font-family: monospace; font-size: 0.74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 200px;"
+                                      title="@context.Item.QueryFingerprint">
+                                    @TruncateKey(context.Item.QueryFingerprint, 28)
+                                </span>
+                            </CellTemplate>
+                        </PropertyColumn>
+                        <PropertyColumn T="AnomalyResult" TProperty="string"
+                                        Property="@(a => a.Metric)"
+                                        Title="Metric"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #8b5cf6; font-size: 0.78rem; padding: 6px 12px;" />
+                        <PropertyColumn T="AnomalyResult" TProperty="double"
+                                        Property="@(a => a.CurrentValue)"
+                                        Title="Current Value"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #f59e0b; font-family: monospace; font-size: 0.8rem; font-weight: 600; padding: 6px 12px;">
+                            <CellTemplate>
+                                @FormatMetricValue(context.Item.CurrentValue, context.Item.Metric)
+                            </CellTemplate>
+                        </PropertyColumn>
+                        <PropertyColumn T="AnomalyResult" TProperty="double"
+                                        Property="@(a => a.HistoricalAvg)"
+                                        Title="Historical Avg"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="color: #94a3b8; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;">
+                            <CellTemplate>
+                                @FormatMetricValue(context.Item.HistoricalAvg, context.Item.Metric)
+                            </CellTemplate>
+                        </PropertyColumn>
+                        <PropertyColumn T="AnomalyResult" TProperty="double"
+                                        Property="@(a => a.DeviationFactor)"
+                                        Title="Deviation"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="padding: 6px 12px;">
+                            <CellTemplate>
+                                <span style="color: @GetDeviationColor(context.Item.DeviationFactor); font-family: monospace; font-size: 0.82rem; font-weight: 700;">
+                                    @context.Item.DeviationFactor.ToString("F1")x
+                                </span>
+                            </CellTemplate>
+                        </PropertyColumn>
+                        <PropertyColumn T="AnomalyResult" TProperty="string"
+                                        Property="@(a => a.Severity)"
+                                        Title="Severity"
+                                        Sortable="true"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="padding: 6px 12px;">
+                            <CellTemplate>
+                                <span style="background: @GetSeverityBg(context.Item.Severity); color: @GetSeverityColor(context.Item.Severity); border-radius: 4px; padding: 2px 8px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;">
+                                    @context.Item.Severity
+                                </span>
+                            </CellTemplate>
+                        </PropertyColumn>
+                        <PropertyColumn T="AnomalyResult" TProperty="string"
+                                        Property="@(a => a.SampleSql)"
+                                        Title="Sample SQL"
+                                        Sortable="false"
+                                        HeaderStyle="@_colHeaderStyle"
+                                        CellStyle="padding: 6px 12px;">
+                            <CellTemplate>
+                                <span style="color: #cbd5e1; font-family: monospace; font-size: 0.74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 280px;"
+                                      title="@context.Item.SampleSql">
+                                    @TruncateSql(context.Item.SampleSql)
+                                </span>
+                            </CellTemplate>
+                        </PropertyColumn>
+                    </Columns>
+                </MudDataGrid>
+            </MudPaper>
+        }
+    </MudTabPanel>
+
+</MudTabs>
+
+@code {
+    // ---- Inner types for chart data ----
+
+    private class WaitCategoryPoint
+    {
+        public string Category { get; set; } = "";
+        public long WaitTimeMs { get; set; }
+    }
+
+    private class WaitTypePoint
+    {
+        public string WaitType { get; set; } = "";
+        public long WaitTimeMs { get; set; }
+    }
+
+    // ---- Shared style constants ----
+
+    private const string _colHeaderStyle =
+        "color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; " +
+        "background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px; white-space: nowrap;";
+
+    // ---- SignalR ----
+
+    private HubConnection? _diagHub;
+
+    // ---- Live data (from SignalR) ----
+
+    private List<SessionInfo> _sessions = new();
+    private List<ActiveBlockingInfo> _activeBlocking = new();
+    private List<WaitStatEntry> _waitStats = new();
+
+    // ---- Tab 1: Health Overview ----
+
+    private string? _healthSession;
+    private bool _healthLoading;
+    private List<DeadlockEvent> _healthDeadlocks = new();
+    private List<HealthInsight> _healthInsights = new();
+
+    private string _topWaitCategory => _waitStats.Count > 0
+        ? _waitStats
+            .GroupBy(w => w.WaitCategory)
+            .OrderByDescending(g => g.Sum(w => w.WaitTimeMs))
+            .Select(g => g.Key)
+            .FirstOrDefault() ?? "—"
+        : "—";
+
+    private string _serverHealth => _healthInsights.Count == 0
+        ? "Good"
+        : _healthInsights.Any(i => i.Severity.Equals("Critical", StringComparison.OrdinalIgnoreCase))
+            ? "Critical"
+            : _healthInsights.Any(i => i.Severity.Equals("Warning", StringComparison.OrdinalIgnoreCase))
+                ? "Warning"
+                : "Good";
+
+    private string _serverHealthColor => _serverHealth switch
+    {
+        "Critical" => "#ef4444",
+        "Warning" => "#f59e0b",
+        _ => "#22c55e"
+    };
+
+    private string _healthInsightSummary => _healthInsights.Count == 0
+        ? "No issues found"
+        : $"{_healthInsights.Count} insight{(_healthInsights.Count != 1 ? "s" : "")}";
+
+    // ---- Tab 2: Deadlocks ----
+
+    private string? _deadlockSession;
+    private bool _deadlockLoading;
+    private List<DeadlockEvent> _deadlocks = new();
+
+    // ---- Tab 3: Blocking ----
+
+    private string? _blockingSession;
+    private bool _blockingLoading;
+    private List<BlockingEvent> _blockingEvents = new();
+
+    // ---- Tab 4: Wait Stats ----
+
+    private List<WaitCategoryPoint> _categoryChartData = new();
+    private List<WaitTypePoint> _topWaitData = new();
+
+    // ---- Tab 5: Anomalies ----
+
+    private string? _anomalySession;
+    private bool _anomalyLoading;
+    private bool _anomalyRan;
+    private double _anomalyThreshold = 2.0;
+    private List<AnomalyResult> _anomalies = new();
+
+    // ---- Chart options ----
+
+    private static readonly Dictionary<string, string> _categoryColors = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["CPU"] = "#06b6d4",
+        ["I/O"] = "#f59e0b",
+        ["Lock"] = "#ef4444",
+        ["Memory"] = "#8b5cf6",
+        ["Network"] = "#22c55e",
+        ["Other"] = "#64748b"
+    };
+
+    private readonly ApexChartOptions<WaitCategoryPoint> _donutOptions = new()
+    {
+        Chart = new Chart
+        {
+            Background = "transparent",
+            Toolbar = new Toolbar { Show = false },
+            Animations = new Animations { Enabled = true, Speed = 400 }
+        },
+        Colors = new List<string> { "#06b6d4", "#f59e0b", "#ef4444", "#8b5cf6", "#22c55e", "#64748b" },
+        Legend = new Legend
+        {
+            Position = LegendPosition.Bottom,
+            Labels = new LegendLabels { Colors = new List<string> { "#94a3b8" } },
+            FontSize = "11px"
+        },
+        Tooltip = new Tooltip { Enabled = true },
+        PlotOptions = new PlotOptions
+        {
+            Pie = new PlotOptionsPie
+            {
+                Donut = new PlotOptionsDonut
+                {
+                    Size = "65%",
+                    Labels = new DonutLabels
+                    {
+                        Show = true,
+                        Total = new DonutLabelTotal
+                        {
+                            Show = true,
+                            Label = "Total",
+                            Color = "#94a3b8",
+                            FontSize = "13px"
+                        }
+                    }
+                }
+            }
+        },
+        Stroke = new Stroke { Width = new List<int> { 0 } },
+        DataLabels = new DataLabels
+        {
+            Style = new DataLabelsStyle { Colors = new List<string> { "#020617" } }
+        }
+    };
+
+    private readonly ApexChartOptions<WaitTypePoint> _barOptions = new()
+    {
+        Chart = new Chart
+        {
+            Background = "transparent",
+            ForeColor = "#94a3b8",
+            Toolbar = new Toolbar { Show = false },
+            Animations = new Animations { Enabled = false }
+        },
+        Colors = new List<string> { "#06b6d4" },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar
+            {
+                Horizontal = true,
+                BarHeight = "70%",
+                BorderRadius = 3
+            }
+        },
+        Grid = new Grid
+        {
+            BorderColor = "#1e293b",
+            StrokeDashArray = 3,
+            Xaxis = new GridXAxis { Lines = new Lines { Show = true } }
+        },
+        Xaxis = new XAxis
+        {
+            Labels = new XAxisLabels
+            {
+                Style = new AxisLabelStyle { Colors = "#64748b", FontSize = "10px" }
+            },
+            AxisBorder = new AxisBorder { Show = false },
+            AxisTicks = new AxisTicks { Show = false }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    MaxWidth = 180,
+                    Style = new AxisLabelStyle { Colors = new List<string> { "#94a3b8" }, FontSize = "10px", FontFamily = "monospace" }
+                }
+            }
+        },
+        Tooltip = new Tooltip { Enabled = true },
+        DataLabels = new DataLabels { Enabled = false }
+    };
+
+    // ---- Lifecycle ----
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ConnectToHubAsync();
+    }
+
+    private async Task ConnectToHubAsync()
+    {
+        _diagHub = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/hubs/diagnostics"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _diagHub.On<List<ActiveBlockingInfo>>("ReceiveActiveBlocking", blocking =>
+        {
+            _activeBlocking = blocking;
+            InvokeAsync(StateHasChanged);
+        });
+
+        _diagHub.On<List<WaitStatEntry>>("ReceiveWaitStats", stats =>
+        {
+            _waitStats = stats;
+            RebuildChartData();
+            InvokeAsync(StateHasChanged);
+        });
+
+        _diagHub.On<List<SessionInfo>>("ReceiveSessionList", sessions =>
+        {
+            _sessions = sessions;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _diagHub.StartAsync();
+            await _diagHub.InvokeAsync("SubscribeDiagnostics");
+        }
+        catch
+        {
+            // Hub unavailable — live data will be absent, on-demand loads still work
+        }
+    }
+
+    // ---- Tab change handler ----
+
+    private void OnTabChanged(int index)
+    {
+        // No auto-load on tab switch — user explicitly requests via selectors/buttons
+    }
+
+    // ---- Health Overview ----
+
+    private async Task OnHealthSessionChanged(string? session)
+    {
+        _healthSession = session;
+        if (!string.IsNullOrEmpty(session))
+            await LoadHealthAsync();
+        else
+            StateHasChanged();
+    }
+
+    private async Task LoadHealthAsync()
+    {
+        if (string.IsNullOrEmpty(_healthSession))
+            return;
+
+        _healthLoading = true;
+        _healthInsights.Clear();
+        _healthDeadlocks.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+
+            // Fetch deadlocks and blocking in parallel
+            var deadlockTask = ProfilerService.GetDeadlocksAsync(connStr, _healthSession!);
+            var blockingTask = ProfilerService.GetBlockingEventsAsync(connStr, _healthSession!);
+            await Task.WhenAll(deadlockTask, blockingTask);
+
+            _healthDeadlocks = deadlockTask.Result;
+            var blockingEvents = blockingTask.Result;
+
+            // Build insights from collected data
+            _healthInsights = BuildHealthInsights(_healthDeadlocks, blockingEvents, _activeBlocking, _waitStats);
+        }
+        catch (Exception ex)
+        {
+            _healthInsights = new List<HealthInsight>
+            {
+                new() { Severity = "Warning", Category = "Connectivity", Message = "Could not load health data", Detail = ex.Message }
+            };
+        }
+        finally
+        {
+            _healthLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static List<HealthInsight> BuildHealthInsights(
+        List<DeadlockEvent> deadlocks,
+        List<BlockingEvent> blockingEvents,
+        List<ActiveBlockingInfo> activeBlocking,
+        List<WaitStatEntry> waitStats)
+    {
+        var insights = new List<HealthInsight>();
+
+        if (deadlocks.Count > 0)
+        {
+            insights.Add(new HealthInsight
+            {
+                Severity = deadlocks.Count >= 5 ? "Critical" : "Warning",
+                Category = "Deadlocks",
+                Message = $"{deadlocks.Count} deadlock{(deadlocks.Count != 1 ? "s" : "")} detected in session",
+                Detail = "Review the Deadlocks tab for involved processes and resources."
+            });
+        }
+
+        if (activeBlocking.Count > 0)
+        {
+            var maxWait = activeBlocking.Max(b => b.WaitTimeMs);
+            insights.Add(new HealthInsight
+            {
+                Severity = maxWait >= 10_000 ? "Critical" : "Warning",
+                Category = "Blocking",
+                Message = $"{activeBlocking.Count} active blocking chain{(activeBlocking.Count != 1 ? "s" : "")} detected",
+                Detail = $"Longest wait: {maxWait:N0} ms. Check the Blocking tab for details."
+            });
+        }
+
+        if (blockingEvents.Count > 0)
+        {
+            insights.Add(new HealthInsight
+            {
+                Severity = "Warning",
+                Category = "Blocking",
+                Message = $"{blockingEvents.Count} historical blocking event{(blockingEvents.Count != 1 ? "s" : "")} in session",
+                Detail = "Blocking events indicate lock contention. Consider index or query tuning."
+            });
+        }
+
+        if (waitStats.Count > 0)
+        {
+            var lockWaits = waitStats.Where(w => w.WaitCategory == "Lock").Sum(w => w.WaitTimeMs);
+            var ioWaits = waitStats.Where(w => w.WaitCategory == "I/O").Sum(w => w.WaitTimeMs);
+            var totalWaits = waitStats.Sum(w => w.WaitTimeMs);
+
+            if (totalWaits > 0)
+            {
+                if (lockWaits > totalWaits * 0.3)
+                {
+                    insights.Add(new HealthInsight
+                    {
+                        Severity = "Warning",
+                        Category = "Wait Stats",
+                        Message = "High lock wait contention detected",
+                        Detail = $"Lock waits account for {lockWaits * 100.0 / totalWaits:F1}% of total wait time."
+                    });
+                }
+                if (ioWaits > totalWaits * 0.4)
+                {
+                    insights.Add(new HealthInsight
+                    {
+                        Severity = "Warning",
+                        Category = "Wait Stats",
+                        Message = "High I/O wait time detected",
+                        Detail = $"I/O waits account for {ioWaits * 100.0 / totalWaits:F1}% of total wait time. Check disk subsystem."
+                    });
+                }
+            }
+        }
+
+        return insights;
+    }
+
+    // ---- Deadlocks ----
+
+    private async Task OnDeadlockSessionChanged(string? session)
+    {
+        _deadlockSession = session;
+        if (!string.IsNullOrEmpty(session))
+            await LoadDeadlocksAsync();
+        else
+            StateHasChanged();
+    }
+
+    private async Task LoadDeadlocksAsync()
+    {
+        if (string.IsNullOrEmpty(_deadlockSession))
+            return;
+
+        _deadlockLoading = true;
+        _deadlocks.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            _deadlocks = await ProfilerService.GetDeadlocksAsync(connStr, _deadlockSession!);
+        }
+        catch
+        {
+            _deadlocks = new List<DeadlockEvent>();
+        }
+        finally
+        {
+            _deadlockLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ---- Blocking ----
+
+    private async Task OnBlockingSessionChanged(string? session)
+    {
+        _blockingSession = session;
+        if (!string.IsNullOrEmpty(session))
+            await LoadBlockingAsync();
+        else
+            StateHasChanged();
+    }
+
+    private async Task LoadBlockingAsync()
+    {
+        if (string.IsNullOrEmpty(_blockingSession))
+            return;
+
+        _blockingLoading = true;
+        _blockingEvents.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            _blockingEvents = await ProfilerService.GetBlockingEventsAsync(connStr, _blockingSession!);
+        }
+        catch
+        {
+            _blockingEvents = new List<BlockingEvent>();
+        }
+        finally
+        {
+            _blockingLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ---- Wait Stats chart rebuild ----
+
+    private void RebuildChartData()
+    {
+        // Category donut
+        _categoryChartData = _waitStats
+            .GroupBy(w => w.WaitCategory)
+            .Select(g => new WaitCategoryPoint { Category = g.Key, WaitTimeMs = g.Sum(w => w.WaitTimeMs) })
+            .OrderByDescending(p => p.WaitTimeMs)
+            .ToList();
+
+        // Top 20 bar
+        _topWaitData = _waitStats
+            .OrderByDescending(w => w.WaitTimeMs)
+            .Take(20)
+            .Select(w => new WaitTypePoint { WaitType = w.WaitType, WaitTimeMs = w.WaitTimeMs })
+            .ToList();
+    }
+
+    // ---- Anomaly Detection ----
+
+    private async Task RunAnomalyDetectionAsync()
+    {
+        if (string.IsNullOrEmpty(_anomalySession))
+            return;
+
+        _anomalyLoading = true;
+        _anomalyRan = false;
+        _anomalies.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var connStr = ConnectionStringResolver.Resolve();
+            var serverName = SqlServer.Profiler.Mcp.Services.MemoryService.ExtractServerName(connStr);
+            _anomalies = await TrendAnalysisService.DetectAnomaliesAsync(serverName, connStr, _anomalySession!, _anomalyThreshold);
+            _anomalyRan = true;
+        }
+        catch
+        {
+            _anomalies = new List<AnomalyResult>();
+            _anomalyRan = true;
+        }
+        finally
+        {
+            _anomalyLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ---- Formatting helpers ----
+
+    private static string FormatMs(long ms) => ms switch
+    {
+        >= 60_000 => $"{ms / 60_000.0:F1}m",
+        >= 1_000 => $"{ms / 1_000.0:F1}s",
+        0 => "—",
+        _ => $"{ms:N0}ms"
+    };
+
+    private static string TruncateSql(string? sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+            return "—";
+        var trimmed = sql.Trim().Replace("\r\n", " ").Replace("\n", " ");
+        return trimmed.Length > 100 ? trimmed[..97] + "..." : trimmed;
+    }
+
+    private static string TruncateKey(string key, int max = 40)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return key;
+        return key.Length > max ? key[..(max - 3)] + "..." : key;
+    }
+
+    private static string FormatMetricValue(double value, string metric)
+    {
+        if (metric.Contains("Duration", StringComparison.OrdinalIgnoreCase) ||
+            metric.Contains("Time", StringComparison.OrdinalIgnoreCase))
+        {
+            // Assume microseconds
+            var us = (long)value;
+            return us switch
+            {
+                >= 1_000_000 => $"{us / 1_000_000.0:F2}s",
+                >= 1_000 => $"{us / 1_000.0:F1}ms",
+                0 => "—",
+                _ => $"{us}µs"
+            };
+        }
+        return value.ToString("N0");
+    }
+
+    // ---- Color helpers ----
+
+    private static string GetInsightDotStyle(string severity) => severity.ToLowerInvariant() switch
+    {
+        "critical" => "color: #ef4444; font-size: 10px; margin-top: 5px; flex-shrink: 0;",
+        "warning"  => "color: #f59e0b; font-size: 10px; margin-top: 5px; flex-shrink: 0;",
+        "info"     => "color: #06b6d4; font-size: 10px; margin-top: 5px; flex-shrink: 0;",
+        _          => "color: #64748b; font-size: 10px; margin-top: 5px; flex-shrink: 0;"
+    };
+
+    private static string GetCategoryBg(string category) => category.ToLowerInvariant() switch
+    {
+        "deadlocks" => "rgba(239,68,68,0.12)",
+        "blocking" => "rgba(245,158,11,0.12)",
+        "wait stats" => "rgba(139,92,246,0.12)",
+        "connectivity" => "rgba(100,116,139,0.12)",
+        _ => "rgba(6,182,212,0.1)"
+    };
+
+    private static string GetCategoryColor(string category) => category.ToLowerInvariant() switch
+    {
+        "deadlocks" => "#ef4444",
+        "blocking" => "#f59e0b",
+        "wait stats" => "#a78bfa",
+        "connectivity" => "#94a3b8",
+        _ => "#06b6d4"
+    };
+
+    private static string GetWaitCategoryBg(string category) => category switch
+    {
+        "CPU" => "rgba(6,182,212,0.12)",
+        "I/O" => "rgba(245,158,11,0.12)",
+        "Lock" => "rgba(239,68,68,0.12)",
+        "Memory" => "rgba(139,92,246,0.12)",
+        "Network" => "rgba(34,197,94,0.12)",
+        _ => "rgba(100,116,139,0.12)"
+    };
+
+    private static string GetWaitCategoryColor(string category) => category switch
+    {
+        "CPU" => "#06b6d4",
+        "I/O" => "#f59e0b",
+        "Lock" => "#ef4444",
+        "Memory" => "#8b5cf6",
+        "Network" => "#22c55e",
+        _ => "#64748b"
+    };
+
+    private static string GetDeviationColor(double factor) => factor switch
+    {
+        >= 4.0 => "#ef4444",
+        >= 2.5 => "#f59e0b",
+        _ => "#8b5cf6"
+    };
+
+    private static string GetSeverityBg(string severity) => severity.ToLowerInvariant() switch
+    {
+        "critical" => "rgba(239,68,68,0.15)",
+        "warning" => "rgba(245,158,11,0.15)",
+        _ => "rgba(6,182,212,0.12)"
+    };
+
+    private static string GetSeverityColor(string severity) => severity.ToLowerInvariant() switch
+    {
+        "critical" => "#ef4444",
+        "warning" => "#f59e0b",
+        _ => "#06b6d4"
+    };
+
+    // ---- Disposal ----
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_diagHub is not null)
+        {
+            try { await _diagHub.InvokeAsync("UnsubscribeDiagnostics"); } catch { }
+            await _diagHub.DisposeAsync();
+        }
+    }
+}
