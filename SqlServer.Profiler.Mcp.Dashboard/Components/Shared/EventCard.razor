@@ -1,0 +1,183 @@
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.Code" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Event Details</MudText>
+            @if (Event is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Style="@_severityChipStyle">@Event.EventName</MudChip>
+            }
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        @if (Event is not null)
+        {
+            <MudStack Spacing="3">
+                {{!-- Metrics grid --}}
+                <MudGrid Spacing="2">
+                    <MudItem xs="6" sm="3">
+                        <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Duration</MudText>
+                            <MudText Typo="Typo.h6" Style="@($"{_durationStyle} font-weight: 700;")">@_durationFormatted</MudText>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">CPU Time</MudText>
+                            <MudText Typo="Typo.h6" Style="color: #e2e8f0; font-weight: 700;">@_cpuFormatted</MudText>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Logical Reads</MudText>
+                            <MudText Typo="Typo.h6" Style="color: #e2e8f0; font-weight: 700;">@Event.LogicalReads.ToString("N0")</MudText>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Writes</MudText>
+                            <MudText Typo="Typo.h6" Style="color: #e2e8f0; font-weight: 700;">@Event.Writes.ToString("N0")</MudText>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Row Count</MudText>
+                            <MudText Typo="Typo.h6" Style="color: #e2e8f0; font-weight: 700;">@Event.RowCount.ToString("N0")</MudText>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px;">
+                            <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Physical Reads</MudText>
+                            <MudText Typo="Typo.h6" Style="color: #e2e8f0; font-weight: 700;">@Event.PhysicalReads.ToString("N0")</MudText>
+                        </MudPaper>
+                    </MudItem>
+                    @if (Event.ErrorNumber.HasValue)
+                    {
+                        <MudItem xs="6" sm="3">
+                            <MudPaper Elevation="0" Style="background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 12px;">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; display: block;">Error #</MudText>
+                                <MudText Typo="Typo.h6" Style="color: #ef4444; font-weight: 700;">@Event.ErrorNumber</MudText>
+                            </MudPaper>
+                        </MudItem>
+                    }
+                </MudGrid>
+
+                {{!-- SQL Text --}}
+                @if (!string.IsNullOrWhiteSpace(Event.SqlText))
+                {
+                    <div>
+                        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; margin-bottom: 6px; display: block;">SQL Text</MudText>
+                        <div style="background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; overflow-x: auto; max-height: 280px; overflow-y: auto;">
+                            <pre class="sql-text" style="margin: 0; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 0.8rem; color: #e2e8f0; white-space: pre-wrap; word-break: break-word;">@Event.SqlText</pre>
+                        </div>
+                    </div>
+                }
+
+                {{!-- Error message --}}
+                @if (!string.IsNullOrWhiteSpace(Event.ErrorMessage))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Style="background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3);">
+                        @Event.ErrorMessage
+                    </MudAlert>
+                }
+
+                {{!-- Query Fingerprint --}}
+                @if (!string.IsNullOrWhiteSpace(Event.QueryFingerprint))
+                {
+                    <div>
+                        <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; margin-bottom: 6px; display: block;">Query Fingerprint</MudText>
+                        <div style="background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 14px;">
+                            <code style="font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 0.75rem; color: #06b6d4; word-break: break-all;">@Event.QueryFingerprint</code>
+                        </div>
+                    </div>
+                }
+
+                {{!-- Metadata --}}
+                <div>
+                    <MudText Typo="Typo.caption" Style="color: #64748b; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; margin-bottom: 8px; display: block;">Metadata</MudText>
+                    <MudGrid Spacing="1">
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; min-width: 110px;">Timestamp</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #e2e8f0; font-family: monospace;">@(Event.EventTimestamp?.ToString("yyyy-MM-dd HH:mm:ss.fff") ?? "—")</MudText>
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; min-width: 110px;">Database</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #e2e8f0;">@(string.IsNullOrWhiteSpace(Event.DatabaseName) ? "—" : Event.DatabaseName)</MudText>
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; min-width: 110px;">Application</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #e2e8f0;">@(string.IsNullOrWhiteSpace(Event.ClientAppName) ? "—" : Event.ClientAppName)</MudText>
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; min-width: 110px;">Login</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #e2e8f0;">@(string.IsNullOrWhiteSpace(Event.LoginName) ? "—" : Event.LoginName)</MudText>
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; min-width: 110px;">Host</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #e2e8f0;">@(string.IsNullOrWhiteSpace(Event.ClientHostname) ? "—" : Event.ClientHostname)</MudText>
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; min-width: 110px;">Session ID</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #e2e8f0; font-family: monospace;">@(Event.SessionId == 0 ? "—" : Event.SessionId.ToString())</MudText>
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; min-width: 110px;">Transaction ID</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #e2e8f0; font-family: monospace;">@(Event.TransactionId?.ToString() ?? "—")</MudText>
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.caption" Style="color: #64748b; min-width: 110px;">Result</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #e2e8f0;">@(string.IsNullOrWhiteSpace(Event.Result) ? "—" : Event.Result)</MudText>
+                            </MudStack>
+                        </MudItem>
+                    </MudGrid>
+                </div>
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public ProfilerEvent? Event { get; set; }
+
+    private string _durationFormatted => Event is null ? "—"
+        : Event.DurationUs >= 1_000_000 ? $"{Event.DurationUs / 1_000_000.0:F2}s"
+        : Event.DurationUs >= 1_000 ? $"{Event.DurationUs / 1_000.0:F1}ms"
+        : $"{Event.DurationUs}µs";
+
+    private string _cpuFormatted => Event is null ? "—"
+        : Event.CpuTimeUs >= 1_000_000 ? $"{Event.CpuTimeUs / 1_000_000.0:F2}s"
+        : Event.CpuTimeUs >= 1_000 ? $"{Event.CpuTimeUs / 1_000.0:F1}ms"
+        : $"{Event.CpuTimeUs}µs";
+
+    private string _durationStyle => Event is null ? "color: #e2e8f0;"
+        : Event.DurationUs >= 5_000_000 ? "color: #ef4444;"
+        : Event.DurationUs >= 1_000_000 ? "color: #f59e0b;"
+        : "color: #e2e8f0;";
+
+    private string _severityChipStyle => Event is null ? ""
+        : Event.ErrorNumber.HasValue ? "background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3);"
+        : Event.DurationUs >= 5_000_000 ? "background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3);"
+        : Event.DurationUs >= 1_000_000 ? "background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3);"
+        : "background: rgba(6,182,212,0.10); color: #06b6d4; border: 1px solid rgba(6,182,212,0.3);";
+
+    private void Close() => MudDialog.Close();
+}

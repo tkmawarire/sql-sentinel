@@ -1,6 +1,627 @@
 @page "/"
+@inject IProfilerService ProfilerService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@implements IAsyncDisposable
 
-<PageTitle>Live Stream - SQL Sentinel</PageTitle>
+<PageTitle>Live Event Stream - SQL Sentinel</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-4" Style="font-weight: 600; color: #e2e8f0;">Live Event Stream</MudText>
-<MudText Typo="Typo.body2" Style="color: #94a3b8;">Real-time SQL Server event monitoring — coming up next.</MudText>
+{{!-- Page header --}}
+<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Live Event Stream</MudText>
+        <MudText Typo="Typo.caption" Style="color: #64748b;">Real-time SQL Server event monitoring via Extended Events</MudText>
+    </MudStack>
+
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        {{!-- Session selector --}}
+        <MudSelect T="string"
+                   Value="_selectedSession"
+                   ValueChanged="OnSessionSelected"
+                   Placeholder="Select session..."
+                   Dense="true"
+                   Variant="Variant.Outlined"
+                   Style="min-width: 220px; background: #0f172a;"
+                   Disabled="@_isStreaming">
+            @foreach (var session in _sessions)
+            {
+                <MudSelectItem T="string" Value="@session.SessionName">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudIcon Icon="@Icons.Material.Filled.Circle"
+                                 Size="Size.Small"
+                                 Style="@(session.State == "STARTED" ? "color: #22c55e; font-size: 8px;" : "color: #64748b; font-size: 8px;")" />
+                        <span>@session.DisplayName</span>
+                    </MudStack>
+                </MudSelectItem>
+            }
+        </MudSelect>
+
+        {{!-- Play / Pause --}}
+        @if (!_isStreaming)
+        {
+            <MudTooltip Text="Start streaming">
+                <MudIconButton Icon="@Icons.Material.Filled.PlayCircleFilled"
+                               Color="Color.Success"
+                               Size="Size.Medium"
+                               OnClick="StartStreaming"
+                               Disabled="@(string.IsNullOrEmpty(_selectedSession))"
+                               Style="background: rgba(34,197,94,0.1); border-radius: 8px;" />
+            </MudTooltip>
+        }
+        else if (_isPaused)
+        {
+            <MudTooltip Text="Resume streaming">
+                <MudIconButton Icon="@Icons.Material.Filled.PlayCircle"
+                               Color="Color.Warning"
+                               Size="Size.Medium"
+                               OnClick="ResumeStreaming"
+                               Style="background: rgba(245,158,11,0.1); border-radius: 8px;" />
+            </MudTooltip>
+        }
+        else
+        {
+            <MudTooltip Text="Pause streaming">
+                <MudIconButton Icon="@Icons.Material.Filled.PauseCircleFilled"
+                               Color="Color.Warning"
+                               Size="Size.Medium"
+                               OnClick="PauseStreaming"
+                               Style="background: rgba(245,158,11,0.1); border-radius: 8px;" />
+            </MudTooltip>
+        }
+
+        @if (_isStreaming)
+        {
+            <MudTooltip Text="Stop streaming">
+                <MudIconButton Icon="@Icons.Material.Filled.StopCircle"
+                               Color="Color.Error"
+                               Size="Size.Medium"
+                               OnClick="StopStreaming"
+                               Style="background: rgba(239,68,68,0.1); border-radius: 8px;" />
+            </MudTooltip>
+        }
+
+        {{!-- Clear --}}
+        <MudTooltip Text="Clear events">
+            <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep"
+                           Color="Color.Default"
+                           Size="Size.Medium"
+                           OnClick="ClearEvents"
+                           Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;" />
+        </MudTooltip>
+
+        {{!-- Event counter --}}
+        <MudPaper Elevation="0" Style="background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.25); border-radius: 8px; padding: 6px 14px;">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudIcon Icon="@Icons.Material.Filled.DataArray" Size="Size.Small" Style="color: #06b6d4;" />
+                <MudText Typo="Typo.body2" Style="color: #06b6d4; font-weight: 600; font-family: monospace;">@_totalEvents.ToString("N0")</MudText>
+            </MudStack>
+        </MudPaper>
+    </MudStack>
+</MudStack>
+
+{{!-- Metric tiles --}}
+<MudGrid Spacing="2" Class="mb-4">
+    <MudItem xs="12" sm="6" md="3">
+        <MetricTile Label="Events / sec"
+                    Value="@_eventsPerSecond.ToString("F1")"
+                    Color="@(_eventsPerSecond > 50 ? "#ef4444" : _eventsPerSecond > 10 ? "#f59e0b" : "#06b6d4")"
+                    Subtitle="@(_isStreaming && !_isPaused ? "Live" : _isPaused ? "Paused" : "Idle")" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MetricTile Label="Total Events"
+                    Value="@_totalEvents.ToString("N0")"
+                    Color="#e2e8f0"
+                    Subtitle="@(_events.Count == MaxBuffer ? "Buffer full (5000)" : $"{_events.Count} buffered")" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MetricTile Label="Avg Duration"
+                    Value="@_avgDurationFormatted"
+                    Color="@(_avgDurationUs >= 1_000_000 ? "#f59e0b" : "#e2e8f0")"
+                    Subtitle="across visible events" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MetricTile Label="Active Session"
+                    Value="@(_selectedSession ?? "None")"
+                    Color="@(_isStreaming ? "#22c55e" : "#64748b")"
+                    Subtitle="@(_hubConnection?.State.ToString() ?? "Disconnected")" />
+    </MudItem>
+</MudGrid>
+
+{{!-- Filter bar --}}
+<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="flex-wrap: wrap; gap: 10px;">
+        <MudTextField @bind-Value="_textFilter"
+                      Placeholder="Search SQL text..."
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      Margin="Margin.Dense"
+                      Variant="Variant.Outlined"
+                      Style="min-width: 260px; background: #020617;"
+                      Immediate="true"
+                      DebounceInterval="200"
+                      OnDebounceIntervalElapsed="ApplyFilters" />
+
+        <MudSelect T="string"
+                   @bind-Value="_databaseFilter"
+                   Placeholder="All databases"
+                   Dense="true"
+                   Variant="Variant.Outlined"
+                   Style="min-width: 180px; background: #020617;"
+                   Clearable="true"
+                   ClearIcon="@Icons.Material.Filled.Clear">
+            @foreach (var db in _availableDatabases)
+            {
+                <MudSelectItem T="string" Value="@db">@db</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudSelect T="long"
+                   @bind-Value="_minDurationUs"
+                   Dense="true"
+                   Variant="Variant.Outlined"
+                   Style="min-width: 160px; background: #020617;">
+            <MudSelectItem T="long" Value="0">All durations</MudSelectItem>
+            <MudSelectItem T="long" Value="10000">&gt; 10 ms</MudSelectItem>
+            <MudSelectItem T="long" Value="100000">&gt; 100 ms</MudSelectItem>
+            <MudSelectItem T="long" Value="1000000">&gt; 1 s</MudSelectItem>
+            <MudSelectItem T="long" Value="5000000">&gt; 5 s</MudSelectItem>
+        </MudSelect>
+
+        <MudButton Variant="Variant.Text"
+                   StartIcon="@Icons.Material.Filled.FilterListOff"
+                   Size="Size.Small"
+                   Style="color: #64748b;"
+                   OnClick="ClearFilters">
+            Clear filters
+        </MudButton>
+
+        {{!-- Active filter chips --}}
+        @if (!string.IsNullOrWhiteSpace(_textFilter) || !string.IsNullOrWhiteSpace(_databaseFilter) || _minDurationUs > 0)
+        {
+            <MudChipSet T="string" Style="display: flex; flex-wrap: wrap; gap: 4px;">
+                @if (!string.IsNullOrWhiteSpace(_textFilter))
+                {
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Style="background: rgba(6,182,212,0.1); color: #06b6d4; border: 1px solid rgba(6,182,212,0.25);"
+                             OnClose="@(() => { _textFilter = ""; ApplyFilters(); })"
+                             CloseIcon="@Icons.Material.Filled.Close">
+                        text: @_textFilter
+                    </MudChip>
+                }
+                @if (!string.IsNullOrWhiteSpace(_databaseFilter))
+                {
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Style="background: rgba(139,92,246,0.1); color: #a78bfa; border: 1px solid rgba(139,92,246,0.25);"
+                             OnClose="@(() => { _databaseFilter = ""; ApplyFilters(); })"
+                             CloseIcon="@Icons.Material.Filled.Close">
+                        db: @_databaseFilter
+                    </MudChip>
+                }
+                @if (_minDurationUs > 0)
+                {
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Style="background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid rgba(245,158,11,0.25);"
+                             OnClose="@(() => { _minDurationUs = 0; ApplyFilters(); })"
+                             CloseIcon="@Icons.Material.Filled.Close">
+                        min: @_minDurationLabel
+                    </MudChip>
+                }
+            </MudChipSet>
+        }
+    </MudStack>
+</MudPaper>
+
+{{!-- Event table --}}
+<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+    @if (!_isStreaming && _filteredEvents.Count == 0)
+    {
+        <div style="padding: 60px 20px; text-align: center;">
+            <MudIcon Icon="@Icons.Material.Filled.WifiOff" Style="color: #1e293b; font-size: 64px; display: block; margin: 0 auto 16px;" />
+            <MudText Typo="Typo.h6" Style="color: #334155; margin-bottom: 8px;">No events yet</MudText>
+            <MudText Typo="Typo.body2" Style="color: #475569;">Select a session above and press play to start streaming events.</MudText>
+        </div>
+    }
+    else if (_isStreaming && _filteredEvents.Count == 0)
+    {
+        <div style="padding: 40px 20px; text-align: center;">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Small" Style="display: block; margin: 0 auto 12px;" />
+            <MudText Typo="Typo.body2" Style="color: #64748b;">Waiting for events from session "@_selectedSession"...</MudText>
+        </div>
+    }
+    else
+    {
+        <MudDataGrid T="ProfilerEvent"
+                     Items="@_filteredEvents"
+                     Dense="true"
+                     Hover="true"
+                     Striped="false"
+                     Virtualize="true"
+                     RowsPerPage="100"
+                     SortMode="SortMode.Single"
+                     RowStyleFunc="@GetRowStyle"
+                     RowClick="@OnRowClick"
+                     Style="background: transparent;"
+                     HeaderClass="mud-datagrid-header-custom">
+            <Columns>
+                <PropertyColumn T="ProfilerEvent" TProperty="string"
+                                Property="@(e => e.EventTimestamp.HasValue ? e.EventTimestamp.Value.ToString("HH:mm:ss.fff") : "—")"
+                                Title="Time"
+                                Sortable="false"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px; white-space: nowrap;"
+                                CellStyle="color: #64748b; font-family: monospace; font-size: 0.78rem; white-space: nowrap; padding: 6px 12px;" />
+
+                <PropertyColumn T="ProfilerEvent" TProperty="string"
+                                Property="@(e => e.EventName)"
+                                Title="Event Type"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="padding: 6px 12px;">
+                    <CellTemplate>
+                        @{
+                            var chipStyle = context.Item.EventName.Contains("Error") || context.Item.ErrorNumber.HasValue
+                                ? "background: rgba(239,68,68,0.12); color: #ef4444; border-radius: 4px; padding: 2px 7px; font-size: 0.7rem; font-weight: 600;"
+                                : "background: rgba(6,182,212,0.08); color: #67e8f9; border-radius: 4px; padding: 2px 7px; font-size: 0.7rem; font-weight: 600;";
+                        }
+                        <span style="@chipStyle">@context.Item.EventName</span>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="ProfilerEvent" TProperty="long"
+                                Property="@(e => e.DurationUs)"
+                                Title="Duration"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="padding: 6px 12px;">
+                    <CellTemplate>
+                        <span style="@GetDurationStyle(context.Item.DurationUs); font-family: monospace; font-size: 0.8rem; font-weight: 600;">
+                            @FormatDuration(context.Item.DurationUs)
+                        </span>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="ProfilerEvent" TProperty="long"
+                                Property="@(e => e.CpuTimeUs)"
+                                Title="CPU"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="color: #94a3b8; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;">
+                    <CellTemplate>
+                        @FormatDuration(context.Item.CpuTimeUs)
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="ProfilerEvent" TProperty="long"
+                                Property="@(e => e.LogicalReads)"
+                                Title="Reads"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="color: #94a3b8; font-family: monospace; font-size: 0.78rem; padding: 6px 12px;">
+                    <CellTemplate>
+                        @(context.Item.LogicalReads > 0 ? context.Item.LogicalReads.ToString("N0") : "—")
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn T="ProfilerEvent" TProperty="string"
+                                Property="@(e => e.DatabaseName)"
+                                Title="Database"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="color: #94a3b8; font-size: 0.78rem; padding: 6px 12px;" />
+
+                <PropertyColumn T="ProfilerEvent" TProperty="string"
+                                Property="@(e => e.ClientAppName)"
+                                Title="Application"
+                                Sortable="true"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="color: #94a3b8; font-size: 0.78rem; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 12px;" />
+
+                <PropertyColumn T="ProfilerEvent" TProperty="string"
+                                Property="@(e => e.SqlText)"
+                                Title="SQL Preview"
+                                Sortable="false"
+                                HeaderStyle="color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; background: #020617; border-bottom: 1px solid #1e293b; padding: 8px 12px;"
+                                CellStyle="padding: 6px 12px;">
+                    <CellTemplate>
+                        <span style="color: #cbd5e1; font-family: monospace; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 380px;">
+                            @TruncateSql(context.Item.SqlText)
+                        </span>
+                    </CellTemplate>
+                </PropertyColumn>
+            </Columns>
+        </MudDataGrid>
+    }
+</MudPaper>
+
+@code {
+    // ---- Constants ----
+    private const int MaxBuffer = 5000;
+
+    // ---- SignalR ----
+    private HubConnection? _hubConnection;
+
+    // ---- State ----
+    private List<ProfilerEvent> _events = new(MaxBuffer);
+    private List<ProfilerEvent> _filteredEvents = new();
+    private List<SessionInfo> _sessions = new();
+    private HashSet<string> _availableDatabases = new(StringComparer.OrdinalIgnoreCase);
+    private bool _isStreaming;
+    private bool _isPaused;
+    private string? _selectedSession;
+
+    // ---- Metrics ----
+    private double _eventsPerSecond;
+    private long _totalEvents;
+    private long _avgDurationUs;
+
+    // ---- Filters ----
+    private string _textFilter = "";
+    private string _databaseFilter = "";
+    private long _minDurationUs;
+
+    private string _avgDurationFormatted => FormatDuration(_avgDurationUs);
+
+    private string _minDurationLabel => _minDurationUs switch
+    {
+        10_000 => "> 10ms",
+        100_000 => "> 100ms",
+        1_000_000 => "> 1s",
+        5_000_000 => "> 5s",
+        _ => "All"
+    };
+
+    // ---- Lifecycle ----
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSessionsAsync();
+        await ConnectToHubAsync();
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        try
+        {
+            var connStr = SqlServer.Profiler.Mcp.Utilities.ConnectionStringResolver.Resolve();
+            _sessions = await ProfilerService.ListSessionsAsync(connStr);
+        }
+        catch
+        {
+            _sessions = new List<SessionInfo>();
+        }
+    }
+
+    private async Task ConnectToHubAsync()
+    {
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/hubs/events"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<ProfilerEvent>("ReceiveEvent", OnEventReceived);
+        _hubConnection.On<double>("ReceiveEventRate", rate =>
+        {
+            _eventsPerSecond = rate;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Hub unavailable — streaming will fail gracefully when user attempts play
+        }
+    }
+
+    // ---- Session selection ----
+
+    private void OnSessionSelected(string? session)
+    {
+        if (_isStreaming)
+            return;
+        _selectedSession = session;
+        StateHasChanged();
+    }
+
+    // ---- Streaming control ----
+
+    private async Task StartStreaming()
+    {
+        if (string.IsNullOrEmpty(_selectedSession) || _hubConnection is null)
+            return;
+
+        try
+        {
+            if (_hubConnection.State == HubConnectionState.Disconnected)
+                await _hubConnection.StartAsync();
+
+            await _hubConnection.SendAsync("SubscribeToSession", _selectedSession);
+            _isStreaming = true;
+            _isPaused = false;
+            StateHasChanged();
+        }
+        catch
+        {
+            // Silently fail — connection may not be ready
+        }
+    }
+
+    private void PauseStreaming()
+    {
+        _isPaused = true;
+        StateHasChanged();
+    }
+
+    private void ResumeStreaming()
+    {
+        _isPaused = false;
+        StateHasChanged();
+    }
+
+    private async Task StopStreaming()
+    {
+        if (_hubConnection is not null && !string.IsNullOrEmpty(_selectedSession))
+        {
+            try
+            {
+                await _hubConnection.SendAsync("UnsubscribeFromSession", _selectedSession);
+            }
+            catch { }
+        }
+
+        _isStreaming = false;
+        _isPaused = false;
+        _eventsPerSecond = 0;
+        StateHasChanged();
+    }
+
+    // ---- Event handling ----
+
+    private void OnEventReceived(ProfilerEvent evt)
+    {
+        if (_isPaused)
+            return;
+
+        _totalEvents++;
+
+        // Circular buffer: remove oldest when full
+        lock (_events)
+        {
+            if (_events.Count >= MaxBuffer)
+                _events.RemoveAt(0);
+
+            _events.Add(evt);
+        }
+
+        // Track available databases for filter
+        if (!string.IsNullOrWhiteSpace(evt.DatabaseName))
+            _availableDatabases.Add(evt.DatabaseName);
+
+        ApplyFilters();
+        InvokeAsync(StateHasChanged);
+    }
+
+    // ---- Filters ----
+
+    private void ApplyFilters()
+    {
+        IEnumerable<ProfilerEvent> query;
+
+        lock (_events)
+        {
+            query = _events.ToList(); // snapshot
+        }
+
+        if (!string.IsNullOrWhiteSpace(_textFilter))
+            query = query.Where(e => e.SqlText.Contains(_textFilter, StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(_databaseFilter))
+            query = query.Where(e => e.DatabaseName.Equals(_databaseFilter, StringComparison.OrdinalIgnoreCase));
+
+        if (_minDurationUs > 0)
+            query = query.Where(e => e.DurationUs >= _minDurationUs);
+
+        _filteredEvents = query.ToList();
+
+        // Update avg duration metric
+        _avgDurationUs = _filteredEvents.Count > 0
+            ? (long)_filteredEvents.Average(e => e.DurationUs)
+            : 0;
+    }
+
+    private void ClearFilters()
+    {
+        _textFilter = "";
+        _databaseFilter = "";
+        _minDurationUs = 0;
+        ApplyFilters();
+        StateHasChanged();
+    }
+
+    private void ClearEvents()
+    {
+        lock (_events)
+        {
+            _events.Clear();
+        }
+        _filteredEvents.Clear();
+        _totalEvents = 0;
+        _avgDurationUs = 0;
+        _eventsPerSecond = 0;
+        StateHasChanged();
+    }
+
+    // ---- Row detail dialog ----
+
+    private async Task OnRowClick(DataGridRowClickEventArgs<ProfilerEvent> args)
+    {
+        var parameters = new DialogParameters<EventCard>
+        {
+            { x => x.Event, args.Item }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = true
+        };
+
+        await DialogService.ShowAsync<EventCard>("Event Details", parameters, options);
+    }
+
+    // ---- Formatting helpers ----
+
+    private static string FormatDuration(long us) => us switch
+    {
+        >= 1_000_000 => $"{us / 1_000_000.0:F2}s",
+        >= 1_000 => $"{us / 1_000.0:F1}ms",
+        0 => "—",
+        _ => $"{us}µs"
+    };
+
+    private static string GetDurationStyle(long us) => us switch
+    {
+        >= 5_000_000 => "color: #ef4444;",
+        >= 1_000_000 => "color: #f59e0b;",
+        _ => "color: #e2e8f0;"
+    };
+
+    private static string GetRowStyle(ProfilerEvent evt, int _)
+    {
+        if (evt.ErrorNumber.HasValue || evt.EventName.Contains("Error"))
+            return "background: rgba(239,68,68,0.06); border-left: 2px solid rgba(239,68,68,0.4);";
+        if (evt.DurationUs >= 5_000_000)
+            return "background: rgba(239,68,68,0.03); border-left: 2px solid rgba(239,68,68,0.25); cursor: pointer;";
+        if (evt.DurationUs >= 1_000_000)
+            return "background: rgba(245,158,11,0.03); border-left: 2px solid rgba(245,158,11,0.25); cursor: pointer;";
+        return "cursor: pointer;";
+    }
+
+    private static string TruncateSql(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+            return "—";
+        var trimmed = sql.Trim().Replace("\r\n", " ").Replace("\n", " ");
+        return trimmed.Length > 120 ? trimmed[..117] + "..." : trimmed;
+    }
+
+    // ---- Disposal ----
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isStreaming && _hubConnection is not null && !string.IsNullOrEmpty(_selectedSession))
+        {
+            try { await _hubConnection.SendAsync("UnsubscribeFromSession", _selectedSession); }
+            catch { }
+        }
+
+        if (_hubConnection is not null)
+            await _hubConnection.DisposeAsync();
+    }
+}
