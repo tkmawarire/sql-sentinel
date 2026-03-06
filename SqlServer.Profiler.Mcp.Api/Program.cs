@@ -18,6 +18,8 @@ builder.Services.AddSingleton<IEventStreamingService>(sp => sp.GetRequiredServic
 builder.Services.AddHostedService(sp => sp.GetRequiredService<EventStreamingService>());
 builder.Services.AddSingleton<IMemoryService, MemoryService>();
 builder.Services.AddHostedService(sp => (MemoryService)sp.GetRequiredService<IMemoryService>());
+builder.Services.AddSingleton<ISqlParsingService, SqlParsingService>();
+builder.Services.AddSingleton<ITrendAnalysisService, TrendAnalysisService>();
 
 // Register MCP tool classes as transient (they are lightweight wrappers)
 builder.Services.AddTransient<SessionManagementTools>();
@@ -25,6 +27,7 @@ builder.Services.AddTransient<EventRetrievalTools>();
 builder.Services.AddTransient<PermissionTools>();
 builder.Services.AddTransient<DiagnosticTools>();
 builder.Services.AddTransient<MemoryTools>();
+builder.Services.AddTransient<AnalyticsTools>();
 
 // Add controllers with XML documentation for Swagger
 builder.Services.AddControllers();
