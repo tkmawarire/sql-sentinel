@@ -6,8 +6,11 @@
 
 <PageTitle>Live Event Stream - SQL Sentinel</PageTitle>
 
+@* Full-height flex container — no page scroll, only table scrolls *@
+<div style="display: flex; flex-direction: column; height: calc(100vh - 64px); overflow: hidden;">
+
 @* Page header *@
-<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px;">
+<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4" Style="flex-wrap: wrap; gap: 12px; flex-shrink: 0;">
     <MudStack Spacing="0">
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #e2e8f0; letter-spacing: -0.5px;">Live Event Stream</MudText>
         <MudText Typo="Typo.caption" Style="color: #64748b;">Real-time SQL Server event monitoring via Extended Events</MudText>
@@ -100,7 +103,7 @@
 </MudStack>
 
 @* Metric tiles *@
-<MudGrid Spacing="2" Class="mb-4">
+<MudGrid Spacing="2" Class="mb-4" Style="flex-shrink: 0;">
     <MudItem xs="12" sm="6" md="3">
         <MetricTile Label="Events / sec"
                     Value="@_eventsPerSecond.ToString("F1")"
@@ -128,7 +131,7 @@
 </MudGrid>
 
 @* Filter bar *@
-<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
+<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; flex-shrink: 0;">
     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="flex-wrap: wrap; gap: 10px;">
         <MudTextField @bind-Value="_textFilter"
                       Placeholder="Search SQL text..."
@@ -215,7 +218,7 @@
 </MudPaper>
 
 @* Event table *@
-<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+<MudPaper Elevation="0" Style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden; flex: 1; display: flex; flex-direction: column; min-height: 0;">
     @if (!_isStreaming && _filteredEvents.Count == 0)
     {
         <div style="padding: 60px 20px; text-align: center;">
@@ -238,12 +241,12 @@
                      Dense="true"
                      Hover="true"
                      Striped="false"
-                     Virtualize="true"
+                     FixedHeader="true"
                      RowsPerPage="100"
                      SortMode="SortMode.Single"
                      RowStyleFunc="@GetRowStyle"
                      RowClick="@OnRowClick"
-                     Style="background: transparent;"
+                     Style="background: transparent; flex: 1;"
                      HeaderClass="mud-datagrid-header-custom">
             <Columns>
                 <PropertyColumn T="ProfilerEvent" TProperty="string"
@@ -334,6 +337,8 @@
         </MudDataGrid>
     }
 </MudPaper>
+
+</div> @* End full-height flex container *@
 
 @code {
     // ---- Constants ----

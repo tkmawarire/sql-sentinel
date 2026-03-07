@@ -124,6 +124,41 @@ html, body {
     display: none;
 }
 
+/* Live stream page — viewport-height layout so only the table body scrolls */
+.mud-main-content {
+    height: 100vh !important;
+    min-height: unset !important;
+    overflow: hidden !important;
+}
+
+.mud-main-content > .mud-container {
+    height: 100% !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.mud-paper:has(> .mud-data-grid) {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+}
+
+.mud-paper > .mud-data-grid {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.mud-paper > .mud-data-grid > .mud-table-container {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
 /* Metric tile animations */
 .metric-value-change {
     animation: pulse 0.3s ease-in-out;
