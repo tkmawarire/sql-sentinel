@@ -112,9 +112,16 @@ html, body {
     color: #06b6d4 !important;
 }
 
-/* Drawer mini mode */
-.mud-drawer-mini {
-    width: 56px !important;
+/* Drawer mini mode — center icons when collapsed */
+.mud-drawer--closed .mud-nav-link {
+    margin: 2px 0 !important;
+    justify-content: center;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+}
+
+.mud-drawer--closed .mud-nav-link .mud-nav-link-text {
+    display: none;
 }
 
 /* Metric tile animations */
