@@ -1,7 +1,7 @@
 <!-- mcp-name: io.github.tkmawarire/sql-sentinel -->
 # SQL Sentinel MCP Server
 
-[![NuGet](https://img.shields.io/nuget/v/Neofenyx.SqlSentinel.Mcp)](https://www.nuget.org/packages/Neofenyx.SqlSentinel.Mcp)
+[![NuGet](https://img.shields.io/nuget/v/SQLSentinel.Mcp)](https://www.nuget.org/packages/SQLSentinel.Mcp)
 [![Docker](https://img.shields.io/badge/ghcr.io-sql--sentinel--mcp-blue)](https://ghcr.io/tkmawarire/sql-sentinel-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -82,7 +82,7 @@ claude mcp add sql-sentinel \
 Requires .NET 9 SDK or later.
 
 ```bash
-dotnet tool install -g Neofenyx.SqlSentinel.Mcp
+dotnet tool install -g SQLSentinel.Mcp
 ```
 
 ```json

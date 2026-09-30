@@ -65,7 +65,7 @@ jobs:
         env:
           PKG_VERSION: ${{ steps.get-version.outputs.version }}
         run: |
-          PKG_ID="neofenyx.sqlsentinel.mcp"
+          PKG_ID="sqlsentinel.mcp"
           URL="https://api.nuget.org/v3-flatcontainer/${PKG_ID}/${PKG_VERSION}/readme"
           ELAPSED=0
           INTERVAL=15
