@@ -18,15 +18,15 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 
     <!-- NuGet tool packaging -->
-    <PackageId>Neofenyx.SqlSentinel.Mcp</PackageId>
+    <PackageId>SQLSentinel.Mcp</PackageId>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>sql-sentinel-mcp</ToolCommandName>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>mcp;sqlserver;profiler;extended-events;ai;diagnostics</PackageTags>
     <PackageProjectUrl>https://github.com/tkmawarire/sql-sentinel</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <Authors>Neofenyx</Authors>
-    <Copyright>Copyright (c) 2025 Neofenyx</Copyright>
+    <Authors>Takudzwa Mawarire</Authors>
+    <Copyright>Copyright (c) 2025 Takudzwa Mawarire</Copyright>
     <RepositoryUrl>https://github.com/tkmawarire/sql-sentinel</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
